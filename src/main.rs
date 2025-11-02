@@ -7,24 +7,23 @@ use std::path::Path;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Input file list (sample_name<tab>coverage_file, one per line)
-    /// Coverage files must be in tall format (one value per line) and can be gzip compressed
+    /// Tab-separated table: sample_name<tab>coverage_file (supports .gz)
     #[arg(short, long)]
-    input: String,
+    sample_table: String,
 
     /// Ploidy level (1 or 2)
     #[arg(short, long, default_value = "2")]
     ploidy: u8,
 
-    /// Normalization method for computing coverage threshold (mean or median)
+    /// Normalization method: mean or median
     #[arg(short = 'm', long, default_value = "median")]
-    method: String,
+    norm_method: String,
 
-    /// Output file path for zygosity matrix
+    /// Output file path for genotype matrix
     #[arg(short, long)]
-    output: String,
+    genotype_matrix: String,
 
-    /// Minimum coverage threshold (nodes below this are set to ./. or .)
+    /// Minimum coverage threshold (below this: missing)
     #[arg(long, default_value = "0.0")]
     min_coverage: f64,
 }
@@ -328,24 +327,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    if args.method != "mean" && args.method != "median" {
+    if args.norm_method != "mean" && args.norm_method != "median" {
         eprintln!("Error: Method must be 'mean' or 'median'");
         std::process::exit(1);
     }
 
     eprintln!("Pangosity - Node coverage to zygosity matrix");
-    eprintln!("Input: {}", args.input);
+    eprintln!("Input: {}", args.sample_table);
     eprintln!("Ploidy: {}", args.ploidy);
-    eprintln!("Method: {}", args.method);
+    eprintln!("Method: {}", args.norm_method);
     eprintln!("Min coverage: {}", args.min_coverage);
     eprintln!();
 
     // Load samples
-    let samples = load_samples(&args.input, &args.method)?;
+    let samples = load_samples(&args.sample_table, &args.norm_method)?;
     eprintln!("\nLoaded {} samples", samples.len());
 
     // Write zygosity matrix
-    write_zygosity_matrix(&samples, &args.output, args.ploidy, &args.method, args.min_coverage)?;
+    write_zygosity_matrix(&samples, &args.genotype_matrix, args.ploidy, &args.norm_method, args.min_coverage)?;
 
     eprintln!("\nDone!");
     Ok(())
