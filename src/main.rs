@@ -24,7 +24,7 @@ struct Args {
     #[arg(short, long)]
     output: String,
 
-    /// Minimum coverage threshold (nodes below this are set to 0/0)
+    /// Minimum coverage threshold (nodes below this are set to ./. or .)
     #[arg(long, default_value = "0.0")]
     min_coverage: f64,
 }
