@@ -20,7 +20,7 @@ struct Args {
     #[arg(short = 'm', long, default_value = "median")]
     method: String,
 
-    /// Output prefix for zygosity matrix
+    /// Output file path for zygosity matrix
     #[arg(short, long)]
     output: String,
 
@@ -250,7 +250,7 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
 /// Write zygosity matrix to output file
 fn write_zygosity_matrix(
     samples: &[Sample],
-    output_prefix: &str,
+    output_path: &str,
     ploidy: u8,
     method: &str,
     min_coverage: f64,
@@ -279,8 +279,7 @@ fn write_zygosity_matrix(
         }
     }
 
-    let output_file = format!("{}.tsv", output_prefix);
-    let mut file = File::create(&output_file)?;
+    let mut file = File::create(output_path)?;
 
     // Write header
     write!(file, "#node")?;
@@ -314,7 +313,7 @@ fn write_zygosity_matrix(
         writeln!(file)?;
     }
 
-    eprintln!("Wrote zygosity matrix to {}", output_file);
+    eprintln!("Wrote zygosity matrix to {}", output_path);
     Ok(())
 }
 
