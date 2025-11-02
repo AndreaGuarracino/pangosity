@@ -336,9 +336,9 @@ fn write_zygosity_matrix(
     }
     writeln!(file)?;
 
-    // Write zygosity for each node
+    // Write zygosity for each node (1-based to match gafpack node.1, node.2, etc.)
     for node_idx in 0..num_nodes {
-        write!(file, "{}", node_idx)?;
+        write!(file, "{}", node_idx + 1)?;
 
         for sample in samples {
             let ref_coverage = if method == "mean" {
