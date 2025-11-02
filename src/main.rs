@@ -8,6 +8,7 @@ use std::path::Path;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Input file list (sample_name<tab>coverage_file, one per line)
+    /// Coverage files must be in tall format (one value per line) and can be gzip compressed
     #[arg(short, long)]
     input: String,
 
@@ -72,14 +73,15 @@ fn create_reader(path: &Path) -> std::io::Result<Box<dyn BufRead>> {
     Ok(Box::new(BufReader::new(reader)))
 }
 
-/// Parse a coverage file in column format (from gafpack --coverage-column)
+/// Parse a coverage file in tall/column format (from gafpack --coverage-column)
+/// Supports compressed (.gz) and uncompressed files
 /// Format:
 /// ##sample: sample_name
 /// #coverage
 /// value1
 /// value2
 /// ...
-fn parse_coverage_column_format(path: &str) -> std::io::Result<(String, Vec<f64>)> {
+fn parse_coverage_tall_format(path: &str) -> std::io::Result<(String, Vec<f64>)> {
     let file_path = Path::new(path);
     let mut reader = create_reader(file_path)?;
     let mut line = String::new();
@@ -114,62 +116,17 @@ fn parse_coverage_column_format(path: &str) -> std::io::Result<(String, Vec<f64>
         }
     }
 
-    // If we didn't find the column format marker, return an error
-    if !has_sample_line && coverage.is_empty() {
+    // Validate that we got data
+    if !has_sample_line || coverage.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "Not a column format file",
+            format!("Invalid tall format file: {}. Expected ##sample: header and coverage values", path),
         ));
     }
 
     Ok((sample_name, coverage))
 }
 
-/// Parse a coverage file in row format (from gafpack default output)
-/// Format:
-/// #sample\tnode.1\tnode.2\t...
-/// sample_name\tval1\tval2\t...
-fn parse_coverage_row_format(path: &str, _sample_name: &str) -> std::io::Result<Vec<f64>> {
-    let file_path = Path::new(path);
-    let mut reader = create_reader(file_path)?;
-    let mut line = String::new();
-    let mut coverage = Vec::new();
-    let mut found = false;
-
-    loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        let line_str = line.trim();
-
-        if line_str.starts_with("#") {
-            // Skip header
-            continue;
-        }
-
-        let fields: Vec<&str> = line_str.split('\t').collect();
-        if fields.len() > 1 {
-            coverage = fields[1..]
-                .iter()
-                .filter_map(|s| s.parse::<f64>().ok())
-                .collect();
-            found = true;
-            break;
-        }
-    }
-
-    if !found {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("No coverage data found in {}", path),
-        ));
-    }
-
-    Ok(coverage)
-}
 
 /// Compute mean coverage
 fn compute_mean(values: &[f64]) -> f64 {
@@ -241,6 +198,8 @@ fn call_zygosity(coverage: f64, ref_coverage: f64, ploidy: u8, min_cov: f64) -> 
 }
 
 /// Load all samples from input file list
+/// Each line should be: sample_name<tab>coverage_file_path
+/// Coverage files must be in tall format (one value per line) and can be gzip compressed
 fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>> {
     let file = File::open(input_file)?;
     let reader = BufReader::new(file);
@@ -257,18 +216,12 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
         let sample_name = fields[0].to_string();
         let coverage_file = fields[1];
 
-        // Try to parse as column format first
-        let (parsed_name, coverage) = match parse_coverage_column_format(coverage_file) {
+        // Parse tall format coverage file (supports .gz compression)
+        let (parsed_name, coverage) = match parse_coverage_tall_format(coverage_file) {
             Ok((name, cov)) => (if name.is_empty() { sample_name.clone() } else { name }, cov),
-            Err(_) => {
-                // Try row format
-                match parse_coverage_row_format(coverage_file, &sample_name) {
-                    Ok(cov) => (sample_name.clone(), cov),
-                    Err(e) => {
-                        eprintln!("Error parsing {}: {}", coverage_file, e);
-                        continue;
-                    }
-                }
+            Err(e) => {
+                eprintln!("Error parsing {}: {}", coverage_file, e);
+                continue;
             }
         };
 
