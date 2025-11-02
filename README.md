@@ -13,7 +13,7 @@ cargo build --release
 ## Usage
 
 ```bash
-pangosity -s samples.txt -g genotypes.tsv -p 2 -m median
+pangosity -s samples.txt -g genotypes.tsv
 ```
 
 ### Input
@@ -39,15 +39,15 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 - `-g, --genotype-matrix`: Output genotype matrix file
 - `-p, --ploidy`: Ploidy level: 1 or 2 [default: 2]
 - `-m, --norm-method`: Normalization: mean or median [default: median]
-- `--min-coverage`: Minimum coverage threshold [default: 0.0]
+- `--min-coverage`: Minimum coverage threshold [default: 0.0, so disabled]
 
 ### Output
 
 Tab-separated genotype matrix:
 ```
-#node	sample1	sample2	sample3
-1	0/0	0/1	1/1
-2	0/1	1/1	0/0
+#node   sample1     sample2     sample3
+1       0/0         0/1         1/1
+2       0/1         1/1         0/0
 ```
 
 **Haploid** (ploidy=1): `0` (absent), `1` (present), `.` (missing)
