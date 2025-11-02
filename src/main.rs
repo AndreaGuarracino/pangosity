@@ -217,8 +217,8 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
         let coverage_file = fields[1];
 
         // Parse tall format coverage file (supports .gz compression)
-        let (parsed_name, coverage) = match parse_coverage_tall_format(coverage_file) {
-            Ok((name, cov)) => (if name.is_empty() { sample_name.clone() } else { name }, cov),
+        let coverage = match parse_coverage_tall_format(coverage_file) {
+            Ok((_pack_name, cov)) => cov,
             Err(e) => {
                 eprintln!("Error parsing {}: {}", coverage_file, e);
                 continue;
@@ -229,7 +229,7 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
         let median_coverage = compute_median(&coverage);
 
         samples.push(Sample {
-            name: parsed_name,
+            name: sample_name,
             coverage,
             mean_coverage,
             median_coverage,
