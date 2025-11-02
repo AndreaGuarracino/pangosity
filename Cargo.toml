@@ -1,0 +1,10 @@
+[package]
+name = "pangosity"
+version = "0.1.0"
+authors = ["Andrea Guarracino <aguarra1@uthsc.edu>"]
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+flate2 = "1.1.5"
+niffler = "3.0.0"
