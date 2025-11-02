@@ -128,26 +128,27 @@ fn parse_coverage_tall_format(path: &str) -> std::io::Result<(String, Vec<f64>)>
 }
 
 
-/// Compute mean coverage
+/// Compute mean coverage (only non-zero values)
 fn compute_mean(values: &[f64]) -> f64 {
-    if values.is_empty() {
+    let non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
+    if non_zero.is_empty() {
         return 0.0;
     }
-    values.iter().sum::<f64>() / values.len() as f64
+    non_zero.iter().sum::<f64>() / non_zero.len() as f64
 }
 
-/// Compute median coverage
+/// Compute median coverage (only non-zero values)
 fn compute_median(values: &[f64]) -> f64 {
-    if values.is_empty() {
+    let mut non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
+    if non_zero.is_empty() {
         return 0.0;
     }
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let mid = sorted.len() / 2;
-    if sorted.len() % 2 == 0 {
-        (sorted[mid - 1] + sorted[mid]) / 2.0
+    non_zero.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mid = non_zero.len() / 2;
+    if non_zero.len() % 2 == 0 {
+        (non_zero[mid - 1] + non_zero[mid]) / 2.0
     } else {
-        sorted[mid]
+        non_zero[mid]
     }
 }
 
@@ -227,6 +228,7 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
 
         let mean_coverage = compute_mean(&coverage);
         let median_coverage = compute_median(&coverage);
+        let non_zero_count = coverage.iter().filter(|&&x| x > 0.0).count();
 
         samples.push(Sample {
             name: sample_name,
@@ -236,9 +238,10 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
         });
 
         eprintln!(
-            "Loaded sample: {} ({} nodes, mean={:.2}, median={:.2})",
+            "Loaded sample: {} ({} total nodes, {} non-zero, mean={:.2}, median={:.2})",
             samples.last().unwrap().name,
             samples.last().unwrap().coverage.len(),
+            non_zero_count,
             mean_coverage,
             median_coverage
         );
