@@ -245,7 +245,7 @@ fn call_zygosity(
 /// Load all samples from input file list
 /// Each line should be: sample_name<tab>coverage_file_path
 /// Coverage files must be in tall format (one value per line) and can be gzip compressed
-fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>> {
+fn load_samples(input_file: &str) -> std::io::Result<Vec<Sample>> {
     let file = File::open(input_file)?;
     let reader = BufReader::new(file);
     let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
@@ -644,7 +644,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load samples
     info!("Loading samples from {}", args.sample_table);
-    let samples = load_samples(&args.sample_table, &args.norm_method)?;
+    let samples = load_samples(&args.sample_table)?;
     debug!("Loaded {} samples", samples.len());
 
     // Generate and write node coverage mask if requested
