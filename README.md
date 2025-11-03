@@ -86,9 +86,9 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 
 **BIMBAM dosage matrix** (comma-separated):
 ```
-N,A,T,0,1,2
-N,A,T,1,2,0
-N,A,T,0,0,1
+N1,A,T,0,1,2
+N2,A,T,1,2,0
+N3,A,T,0,0,1
 ```
 
 Format: `variant_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
