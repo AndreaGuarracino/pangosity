@@ -16,8 +16,10 @@ cargo build --release
 pangosity -s samples.txt -g genotypes.tsv
 # or
 pangosity -s samples.txt -d dosages.tsv
-# or both
-pangosity -s samples.txt -g genotypes.tsv -d dosages.tsv
+# or
+pangosity -s samples.txt -b dosages.bimbam
+# or combine multiple outputs
+pangosity -s samples.txt -g genotypes.tsv -d dosages.tsv -b dosages.bimbam
 ```
 
 ### Input
@@ -39,17 +41,26 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 
 ### Parameters
 
+**Input:**
 - `-s, --sample-table`: Sample table file: sample_name<tab>coverage_file (supports .gz)
-- `-p, --ploidy`: Ploidy level: 1 or 2 [default: 2]
+
+**Calling parameters:**
+- `-p, --ploidy`: Ploidy level (1 or 2) [default: 2]
 - `-m, --norm-method`: Normalization method (mean or median) [default: median]
-- `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
-- `-d, --dosage-matrix`: Output dosage matrix file (0 and 1 if ploidy=1; 0,1,2 if ploidy=2)
-- `--dosage-bimbam`: Output dosage matrix file in BIMBAM format (variant,ref,alt,dosages...)
-- `--calling-thresholds`: Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
+- `-c, --calling-thresholds`: Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
 - `--min-coverage`: Minimum coverage threshold (below: missing) [default: 0.0]
-- `--node-filter-mask`: Output file for node coverage filter mask (1=keep, 0=filter)
+
+**Output:**
+- `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
+- `-d, --dosage-matrix`: Output dosage matrix file (0,1 if ploidy=1; 0,1,2 if ploidy=2)
+- `-b, --dosage-bimbam`: Output dosage matrix file in BIMBAM format (variant,ref,alt,dosages...)
+- `--node-cov-mask`: Output node coverage mask file (1=keep, 0=filter outliers)
+
+**General:**
 - `-t, --threads`: Number of threads for parallel processing [default: 4]
 - `-v, --verbose`: Verbosity level (0=error, 1=info, 2=debug) [default: 1]
+- `-h, --help`: Print help
+- `-V, --version`: Print version
 
 ### Output
 
@@ -98,7 +109,7 @@ Genotypes are called using coverage thresholds relative to each sample's mean or
 Outlier detection for node coverage filtering:
 
 ```bash
-pangosity -s samples.txt -g genotypes.tsv --node-filter-mask filter.txt
+pangosity -s samples.txt -g genotypes.tsv --node-cov-mask coverage_mask.txt
 ```
 
 The filter:
@@ -128,7 +139,7 @@ For genome-wide association studies, pangosity can output dosage matrices in BIM
 
 ```bash
 # Generate BIMBAM dosage matrix for GEMMA
-pangosity -s samples.txt --bimbam-dosage dosages.bimbam
+pangosity -s samples.txt -b dosages.bimbam
 
 # Create phenotype file (one value per line, matching sample order in samples.txt)
 echo -e "1.5\n2.3\n0.8" > phenotypes.txt

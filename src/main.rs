@@ -22,7 +22,7 @@ struct Args {
     norm_method: String,
 
     /// Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
-    #[arg(help_heading = "Calling parameters", long)]
+    #[arg(short, help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
     /// Minimum coverage threshold (below: missing)
@@ -33,17 +33,17 @@ struct Args {
     #[arg(help_heading = "Output", short, long)]
     genotype_matrix: Option<String>,
 
-    /// Output dosage matrix file (0 and 1 if ploidy=1; 0,1,2 if ploidy=2)
+    /// Output dosage matrix file (0,1 if ploidy=1; 0,1,2 if ploidy=2)
     #[arg(help_heading = "Output", short, long)]
     dosage_matrix: Option<String>,
 
     /// Output dosage matrix file in BIMBAM format (variant,ref,alt,dosages...)
-    #[arg(help_heading = "Output", long)]
+    #[arg(help_heading = "Output", short = 'b', long)]
     dosage_bimbam: Option<String>,
 
-    /// Output file for node coverage filter mask (1=keep, 0=filter)
+    /// Output node coverage mask file (1=keep, 0=filter outliers)
     #[arg(help_heading = "Output", long)]
-    node_filter_mask: Option<String>,
+    node_cov_mask: Option<String>,
 
     /// Number of threads for parallel processing
     #[arg(help_heading = "General", short, long, default_value = "4")]
@@ -647,9 +647,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let samples = load_samples(&args.sample_table, &args.norm_method)?;
     debug!("Loaded {} samples", samples.len());
 
-    // Generate and write node filter mask if requested
-    if let Some(ref mask_path) = args.node_filter_mask {
-        info!("Writing node filter mask to {}", mask_path);
+    // Generate and write node coverage mask if requested
+    if let Some(ref mask_path) = args.node_cov_mask {
+        info!("Writing node coverage mask to {}", mask_path);
         let mask = compute_node_filter_mask(&samples);
         write_node_filter_mask(&mask, mask_path)?;
     }
