@@ -13,19 +13,23 @@ struct Args {
     #[arg(short, long)]
     sample_table: String,
 
-    /// Ploidy level: 1 or 2
+    /// Ploidy level (1 or 2)
     #[arg(short, long, default_value = "2")]
     ploidy: u8,
 
-    /// Normalization method: mean or median
+    /// Normalization method (mean or median)
     #[arg(short = 'm', long, default_value = "median")]
     norm_method: String,
 
-    /// Output genotype matrix file
+    /// Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
     #[arg(short, long)]
-    genotype_matrix: String,
+    genotype_matrix: Option<String>,
 
-    /// Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
+    /// Output dosage matrix file (0 and 1 if ploidy=1; 0,1,2 if ploidy=2)
+    #[arg(short, long)]
+    dosage_matrix: Option<String>,
+
+    /// Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
     #[arg(long)]
     calling_thresholds: Option<String>,
 
@@ -33,7 +37,7 @@ struct Args {
     #[arg(long, default_value = "0.0")]
     min_coverage: f64,
 
-    /// Output file for node coverage filter mask (1 = keep, 0 = filter)
+    /// Output file for node coverage filter mask (1=keep, 0=filter)
     #[arg(long)]
     node_filter_mask: Option<String>,
 
@@ -41,7 +45,7 @@ struct Args {
     #[arg(short, long, default_value = "4")]
     threads: usize,
 
-    /// Verbosity level (0 = error, 1 = info, 2 = debug)
+    /// Verbosity level (0=error, 1=info, 2=debug)
     #[arg(short, long, default_value = "1")]
     verbose: u8,
 }
@@ -79,6 +83,23 @@ impl Zygosity {
             Zygosity::HomRef => "0".to_string(),
             Zygosity::HomAlt => "1".to_string(),
             _ => ".".to_string(),
+        }
+    }
+
+    fn to_dosage(&self, ploidy: u8) -> String {
+        if ploidy == 1 {
+            match self {
+                Zygosity::HomRef => "0".to_string(),
+                Zygosity::HomAlt => "1".to_string(),
+                _ => "NA".to_string(),
+            }
+        } else {
+            match self {
+                Zygosity::HomRef => "0".to_string(),
+                Zygosity::Het => "1".to_string(),
+                Zygosity::HomAlt => "2".to_string(),
+                Zygosity::Missing => "NA".to_string(),
+            }
         }
     }
 }
@@ -408,6 +429,64 @@ fn write_zygosity_matrix(
     Ok(())
 }
 
+/// Write dosage matrix to output file
+fn write_dosage_matrix(
+    samples: &[Sample],
+    output_path: &str,
+    ploidy: u8,
+    method: &str,
+    min_coverage: f64,
+    het_lower: f64,
+    het_upper: f64,
+    haploid_threshold: f64,
+) -> std::io::Result<()> {
+    if samples.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "No samples to write",
+        ));
+    }
+
+    let num_nodes = samples[0].coverage.len();
+    let mut file = File::create(output_path)?;
+
+    // Write header
+    write!(file, "#node")?;
+    for sample in samples {
+        write!(file, "\t{}", sample.name)?;
+    }
+    writeln!(file)?;
+
+    // Write dosage for each node
+    for node_idx in 0..num_nodes {
+        write!(file, "{}", node_idx + 1)?;
+
+        for sample in samples {
+            let ref_coverage = if method == "mean" {
+                sample.mean_coverage
+            } else {
+                sample.median_coverage
+            };
+
+            let coverage = sample.coverage[node_idx];
+            let zygosity = call_zygosity(
+                coverage,
+                ref_coverage,
+                ploidy,
+                min_coverage,
+                het_lower,
+                het_upper,
+                haploid_threshold,
+            );
+
+            write!(file, "\t{}", zygosity.to_dosage(ploidy))?;
+        }
+        writeln!(file)?;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -425,6 +504,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .num_threads(args.threads)
         .build_global()
         .unwrap();
+
+    // Validate at least one output is specified
+    if args.genotype_matrix.is_none() && args.dosage_matrix.is_none() {
+        error!("At least one output must be specified: --genotype-matrix or --dosage-matrix");
+        std::process::exit(1);
+    }
 
     if args.ploidy != 1 && args.ploidy != 2 {
         error!("Ploidy must be 1 or 2");
@@ -474,7 +559,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     debug!("Input: {}", args.sample_table);
-    debug!("Output: {}", args.genotype_matrix);
+    if let Some(ref path) = args.genotype_matrix {
+        debug!("Genotype matrix output: {}", path);
+    }
+    if let Some(ref path) = args.dosage_matrix {
+        debug!("Dosage matrix output: {}", path);
+    }
     debug!("Ploidy: {}", args.ploidy);
     debug!("Normalization method: {}", args.norm_method);
     if args.ploidy == 1 {
@@ -498,18 +588,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         write_node_filter_mask(&mask, mask_path)?;
     }
 
-    // Write zygosity matrix
-    info!("Writing genotype matrix to {}", &args.genotype_matrix);
-    write_zygosity_matrix(
-        &samples,
-        &args.genotype_matrix,
-        args.ploidy,
-        &args.norm_method,
-        args.min_coverage,
-        het_lower,
-        het_upper,
-        haploid_threshold,
-    )?;
+    // Write genotype matrix if requested
+    if let Some(ref genotype_path) = args.genotype_matrix {
+        info!("Writing genotype matrix to {}", genotype_path);
+        write_zygosity_matrix(
+            &samples,
+            genotype_path,
+            args.ploidy,
+            &args.norm_method,
+            args.min_coverage,
+            het_lower,
+            het_upper,
+            haploid_threshold,
+        )?;
+    }
+
+    // Write dosage matrix if requested
+    if let Some(ref dosage_path) = args.dosage_matrix {
+        info!("Writing dosage matrix to {}", dosage_path);
+        write_dosage_matrix(
+            &samples,
+            dosage_path,
+            args.ploidy,
+            &args.norm_method,
+            args.min_coverage,
+            het_lower,
+            het_upper,
+            haploid_threshold,
+        )?;
+    }
 
     info!("Done!");
     Ok(())

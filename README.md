@@ -14,6 +14,10 @@ cargo build --release
 
 ```bash
 pangosity -s samples.txt -g genotypes.tsv
+# or
+pangosity -s samples.txt -d dosages.tsv
+# or both
+pangosity -s samples.txt -g genotypes.tsv -d dosages.tsv
 ```
 
 ### Input
@@ -37,26 +41,36 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 
 - `-s, --sample-table`: Sample table file: sample_name<tab>coverage_file (supports .gz)
 - `-p, --ploidy`: Ploidy level: 1 or 2 [default: 2]
-- `-m, --norm-method`: Normalization method: mean or median [default: median]
-- `-g, --genotype-matrix`: Output genotype matrix file
+- `-m, --norm-method`: Normalization method (mean or median) [default: median]
+- `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
+- `-d, --dosage-matrix`: Output dosage matrix file (0 and 1 if ploidy=1; 0,1,2 if ploidy=2)
+- `--calling-thresholds`: Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
 - `--min-coverage`: Minimum coverage threshold (below: missing) [default: 0.0]
-- `--calling-thresholds`: Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.25,0.75]
-- `--node-filter-mask`: Output file for node coverage filter mask (1 = keep, 0 = filter)
+- `--node-filter-mask`: Output file for node coverage filter mask (1=keep, 0=filter)
 - `-t, --threads`: Number of threads for parallel processing [default: 4]
-- `-v, --verbose`: Verbosity level (0 = error, 1 = info, 2 = debug) [default: 1]
+- `-v, --verbose`: Verbosity level (0=error, 1=info, 2=debug) [default: 1]
 
 ### Output
 
-Tab-separated genotype matrix:
+**Genotype matrix** (tab-separated):
 ```
 #node   sample1     sample2     sample3
 1       0/0         0/1         1/1
 2       0/1         1/1         0/0
 ```
 
-**Haploid** (ploidy=1): `0` (absent), `1` (present), `.` (missing)
+- **Haploid** (ploidy=1): `0` (absent), `1` (present), `.` (missing)
+- **Diploid** (ploidy=2): `0/0` (absent), `0/1` (heterozygous), `1/1` (present), `./.` (missing)
 
-**Diploid** (ploidy=2): `0/0` (absent), `0/1` (heterozygous), `1/1` (present), `./.` (missing)
+**Dosage matrix** (optional, tab-separated):
+```
+#node   sample1     sample2     sample3
+1       0           1           2
+2       1           2           0
+```
+
+- **Haploid** (ploidy=1): `0` (absent), `1` (present), `NA` (missing)
+- **Diploid** (ploidy=2): `0` (0/0), `1` (0/1), `2` (1/1), `NA` (missing)
 
 ## Genotype calling
 
