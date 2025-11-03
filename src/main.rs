@@ -25,20 +25,20 @@ struct Args {
     #[arg(short, long)]
     genotype_matrix: String,
 
+    /// Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
+    #[arg(long)]
+    calling_thresholds: Option<String>,
+
     /// Minimum coverage threshold (below: missing)
     #[arg(long, default_value = "0.0")]
     min_coverage: f64,
-
-    /// Calling thresholds (ploidy 1: value; ploidy 2: lower,upper)
-    #[arg(long, default_value = "0.25,0.75")]
-    calling_thresholds: Option<String>,
 
     /// Output file for node coverage filter mask (1 = keep, 0 = filter)
     #[arg(long)]
     node_filter_mask: Option<String>,
 
     /// Number of threads for parallel processing
-    #[arg(long, default_value = "4")]
+    #[arg(short, long, default_value = "4")]
     threads: usize,
 
     /// Verbosity level (0 = error, 1 = info, 2 = debug)
@@ -215,48 +215,49 @@ fn call_zygosity(
 fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>> {
     let file = File::open(input_file)?;
     let reader = BufReader::new(file);
-    let mut samples = Vec::new();
+    let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
 
-    for line in reader.lines() {
-        let line = line?;
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() != 2 {
-            warn!("Skipping malformed line: {}", line);
-            continue;
-        }
-
-        let sample_name = fields[0].to_string();
-        let coverage_file = fields[1];
-
-        // Parse tall format coverage file (supports .gz compression)
-        let coverage = match parse_coverage_file(coverage_file) {
-            Ok((_pack_name, cov)) => cov,
-            Err(e) => {
-                error!("Error parsing {}: {}", coverage_file, e);
-                continue;
+    let samples: Vec<Sample> = lines
+        .par_iter()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.len() != 2 {
+                warn!("Skipping malformed line: {}", line);
+                return None;
             }
-        };
 
-        let mean_coverage = compute_mean(&coverage);
-        let median_coverage = compute_median(&coverage);
-        let non_zero_count = coverage.iter().filter(|&&x| x > 0.0).count();
+            let sample_name = fields[0].to_string();
+            let coverage_file = fields[1];
 
-        samples.push(Sample {
-            name: sample_name,
-            coverage,
-            mean_coverage,
-            median_coverage,
-        });
+            let coverage = match parse_coverage_file(coverage_file) {
+                Ok((_pack_name, cov)) => cov,
+                Err(e) => {
+                    error!("Error parsing {}: {}", coverage_file, e);
+                    return None;
+                }
+            };
 
-        debug!(
-            "Loaded sample {} ({} nodes, mean={:.2} and median={:.2} coverage on {} non-zero nodes)",
-            samples.last().unwrap().name,
-            samples.last().unwrap().coverage.len(),
-            mean_coverage,
-            median_coverage,
-            non_zero_count
-        );
-    }
+            let mean_coverage = compute_mean(&coverage);
+            let median_coverage = compute_median(&coverage);
+            let non_zero_count = coverage.iter().filter(|&&x| x > 0.0).count();
+
+            debug!(
+                "Loaded sample {} ({} nodes, mean={:.2} and median={:.2} coverage on {} non-zero nodes)",
+                sample_name,
+                coverage.len(),
+                mean_coverage,
+                median_coverage,
+                non_zero_count
+            );
+
+            Some(Sample {
+                name: sample_name,
+                coverage,
+                mean_coverage,
+                median_coverage,
+            })
+        })
+        .collect();
 
     Ok(samples)
 }
