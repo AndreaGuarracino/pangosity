@@ -7,51 +7,59 @@ use std::path::Path;
 
 /// Pangenome-based zygosity matrices from graph coverage data.
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None, disable_help_flag = true, disable_version_flag = true)]
 struct Args {
     /// Sample table file: sample_name<tab>coverage_file (supports .gz)
-    #[arg(short, long)]
+    #[arg(help_heading = "Input", short, long)]
     sample_table: String,
 
     /// Ploidy level (1 or 2)
-    #[arg(short, long, default_value = "2")]
+    #[arg(help_heading = "Calling parameters", short, long, default_value = "2")]
     ploidy: u8,
 
     /// Normalization method (mean or median)
-    #[arg(short = 'm', long, default_value = "median")]
+    #[arg(help_heading = "Calling parameters", short = 'm', long, default_value = "median")]
     norm_method: String,
 
-    /// Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
-    #[arg(short, long)]
-    genotype_matrix: Option<String>,
-
-    /// Output dosage matrix file (0 and 1 if ploidy=1; 0,1,2 if ploidy=2)
-    #[arg(short, long)]
-    dosage_matrix: Option<String>,
-
-    /// Output dosage matrix file in BIMBAM format (variant,ref,alt,dosages...)
-    #[arg(long)]
-    dosage_bimbam: Option<String>,
-
     /// Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
-    #[arg(long)]
+    #[arg(help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
     /// Minimum coverage threshold (below: missing)
-    #[arg(long, default_value = "0.0")]
+    #[arg(help_heading = "Calling parameters", long, default_value = "0.0")]
     min_coverage: f64,
 
+    /// Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
+    #[arg(help_heading = "Output", short, long)]
+    genotype_matrix: Option<String>,
+
+    /// Output dosage matrix file (0 and 1 if ploidy=1; 0,1,2 if ploidy=2)
+    #[arg(help_heading = "Output", short, long)]
+    dosage_matrix: Option<String>,
+
+    /// Output dosage matrix file in BIMBAM format (variant,ref,alt,dosages...)
+    #[arg(help_heading = "Output", long)]
+    dosage_bimbam: Option<String>,
+
     /// Output file for node coverage filter mask (1=keep, 0=filter)
-    #[arg(long)]
+    #[arg(help_heading = "Output", long)]
     node_filter_mask: Option<String>,
 
     /// Number of threads for parallel processing
-    #[arg(short, long, default_value = "4")]
+    #[arg(help_heading = "General", short, long, default_value = "4")]
     threads: usize,
 
     /// Verbosity level (0=error, 1=info, 2=debug)
-    #[arg(short, long, default_value = "1")]
+    #[arg(help_heading = "General", short, long, default_value = "1")]
     verbose: u8,
+
+    /// Print help
+    #[arg(help_heading = "General", short, long, action = clap::ArgAction::Help)]
+    help: Option<bool>,
+
+    /// Print version
+    #[arg(help_heading = "General", short = 'V', long, action = clap::ArgAction::Version)]
+    version: Option<bool>,
 }
 
 /// Sample coverage data
