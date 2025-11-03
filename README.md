@@ -1,6 +1,6 @@
 # Pangosity
 
-Convert node coverage vectors from pangenome alignments into genotype matrices.
+Pangenome-based zygosity matrices from graph coverage data.
 
 ## Installation
 
