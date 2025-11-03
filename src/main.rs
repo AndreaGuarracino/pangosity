@@ -1,5 +1,6 @@
 use clap::Parser;
 use log::{debug, error, info, warn};
+use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufReader, prelude::*};
 use std::path::Path;
@@ -29,12 +30,16 @@ struct Args {
     min_coverage: f64,
 
     /// Calling thresholds (ploidy 1: value; ploidy 2: lower,upper)
-    #[arg(short = 't', long, default_value = "0.25,0.75")]
+    #[arg(long, default_value = "0.25,0.75")]
     calling_thresholds: Option<String>,
 
     /// Output file for node coverage filter mask (1 = keep, 0 = filter)
     #[arg(long)]
     node_filter_mask: Option<String>,
+
+    /// Number of threads for parallel processing
+    #[arg(long, default_value = "4")]
+    threads: usize,
 
     /// Verbosity level (0 = error, 1 = info, 2 = debug)
     #[arg(short, long, default_value = "1")]
@@ -264,16 +269,15 @@ fn compute_node_filter_mask(samples: &[Sample]) -> Vec<u8> {
     }
 
     let num_nodes = samples[0].coverage.len();
-    let mut node_mean_coverages = vec![0.0; num_nodes];
 
-    // Compute mean coverage for each node across all samples
-    for node_idx in 0..num_nodes {
-        let mut sum = 0.0;
-        for sample in samples {
-            sum += sample.coverage[node_idx];
-        }
-        node_mean_coverages[node_idx] = sum / samples.len() as f64;
-    }
+    // Compute mean coverage for each node across all samples (parallel)
+    let node_mean_coverages: Vec<f64> = (0..num_nodes)
+        .into_par_iter()
+        .map(|node_idx| {
+            let sum: f64 = samples.iter().map(|s| s.coverage[node_idx]).sum();
+            sum / samples.len() as f64
+        })
+        .collect();
 
     // Calculate quartiles and IQR
     let mut sorted_coverages = node_mean_coverages.clone();
@@ -290,7 +294,7 @@ fn compute_node_filter_mask(samples: &[Sample]) -> Vec<u8> {
 
     // Create mask
     let mask: Vec<u8> = node_mean_coverages
-        .iter()
+        .par_iter()
         .map(|&cov| {
             if cov >= lower_bound && cov <= upper_bound {
                 1
@@ -414,6 +418,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => log::LevelFilter::Debug,
         })
         .init();
+
+    // Configure rayon thread pool
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(args.threads)
+        .build_global()
+        .unwrap();
 
     if args.ploidy != 1 && args.ploidy != 2 {
         error!("Ploidy must be 1 or 2");

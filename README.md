@@ -40,8 +40,9 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 - `-m, --norm-method`: Normalization method: mean or median [default: median]
 - `-g, --genotype-matrix`: Output genotype matrix file
 - `--min-coverage`: Minimum coverage threshold (below: missing) [default: 0.0]
-- `-t, --calling-thresholds`: Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.25,0.75]
+- `--calling-thresholds`: Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.25,0.75]
 - `--node-filter-mask`: Output file for node coverage filter mask (1 = keep, 0 = filter)
+- `-t, --threads`: Number of threads for parallel processing [default: 4]
 - `-v, --verbose`: Verbosity level (0 = error, 1 = info, 2 = debug) [default: 1]
 
 ### Output
