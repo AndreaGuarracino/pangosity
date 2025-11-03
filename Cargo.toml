@@ -8,3 +8,5 @@ edition = "2024"
 clap = { version = "4.5.51", features = ["derive"] }
 flate2 = "1.1.5"
 niffler = "3.0.0"
+log = "0.4.28"
+env_logger = "0.11.8"

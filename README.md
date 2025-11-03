@@ -41,6 +41,7 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 - `-m, --norm-method`: Normalization: mean or median [default: median]
 - `--min-coverage`: Minimum coverage [default: 0.0]
 - `-t, --calling-thresholds`: Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.5 / 0.25,0.75]
+- `-v, --verbose`: Verbosity level: 0 (error), 1 (info), 2 (debug) [default: 1]
 
 ### Output
 

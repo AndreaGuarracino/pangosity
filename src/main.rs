@@ -1,6 +1,7 @@
 use clap::Parser;
+use log::{debug, error, info, warn};
 use std::fs::File;
-use std::io::{prelude::*, BufReader};
+use std::io::{BufReader, prelude::*};
 use std::path::Path;
 
 /// Pangosity: Call zygosity from node coverage vectors
@@ -30,6 +31,10 @@ struct Args {
     /// Calling thresholds (ploidy 1: value; ploidy 2: lower,upper)
     #[arg(short = 't', long)]
     calling_thresholds: Option<String>,
+
+    /// Verbosity level (0 = error, 1 = info, 2 = debug)
+    #[arg(short, long, default_value = "1")]
+    verbose: u8,
 }
 
 /// Sample coverage data
@@ -44,10 +49,10 @@ struct Sample {
 /// Zygosity genotype for diploid
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Zygosity {
-    HomRef,      // 0/0
-    Het,         // 0/1
-    HomAlt,      // 1/1
-    Missing,     // ./.
+    HomRef,  // 0/0
+    Het,     // 0/1
+    HomAlt,  // 1/1
+    Missing, // ./.
 }
 
 impl Zygosity {
@@ -76,15 +81,8 @@ fn create_reader(path: &Path) -> std::io::Result<Box<dyn BufRead>> {
     Ok(Box::new(BufReader::new(reader)))
 }
 
-/// Parse a coverage file in tall/column format (from gafpack --coverage-column)
-/// Supports compressed (.gz) and uncompressed files
-/// Format:
-/// ##sample: sample_name
-/// #coverage
-/// value1
-/// value2
-/// ...
-fn parse_coverage_tall_format(path: &str) -> std::io::Result<(String, Vec<f64>)> {
+/// Parse a coverage file (from gafpack --coverage-column)
+fn parse_coverage_file(path: &str) -> std::io::Result<(String, Vec<f64>)> {
     let file_path = Path::new(path);
     let mut reader = create_reader(file_path)?;
     let mut line = String::new();
@@ -123,13 +121,15 @@ fn parse_coverage_tall_format(path: &str) -> std::io::Result<(String, Vec<f64>)>
     if !has_sample_line || coverage.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("Invalid tall format file: {}. Expected ##sample: header and coverage values", path),
+            format!(
+                "Invalid coverage file: {}. Expected ##sample: header and coverage values",
+                path
+            ),
         ));
     }
 
     Ok((sample_name, coverage))
 }
-
 
 /// Compute mean coverage (only non-zero values)
 fn compute_mean(values: &[f64]) -> f64 {
@@ -180,20 +180,20 @@ fn call_zygosity(
 
     if ploidy == 1 {
         if coverage >= haploid_threshold * ref_coverage {
-            Zygosity::HomAlt  // Present (1)
+            Zygosity::HomAlt // Present (1)
         } else {
-            Zygosity::HomRef  // Absent (0)
+            Zygosity::HomRef // Absent (0)
         }
     } else if ploidy == 2 {
         let threshold_lower = het_lower * ref_coverage;
         let threshold_upper = het_upper * ref_coverage;
 
         if coverage < threshold_lower {
-            Zygosity::HomRef  // 0/0
+            Zygosity::HomRef // 0/0
         } else if coverage < threshold_upper {
-            Zygosity::Het     // 0/1
+            Zygosity::Het // 0/1
         } else {
-            Zygosity::HomAlt  // 1/1
+            Zygosity::HomAlt // 1/1
         }
     } else {
         panic!("Unsupported ploidy: {}", ploidy);
@@ -212,7 +212,7 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
         let line = line?;
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() != 2 {
-            eprintln!("Warning: Skipping malformed line: {}", line);
+            warn!("Skipping malformed line: {}", line);
             continue;
         }
 
@@ -220,10 +220,10 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
         let coverage_file = fields[1];
 
         // Parse tall format coverage file (supports .gz compression)
-        let coverage = match parse_coverage_tall_format(coverage_file) {
+        let coverage = match parse_coverage_file(coverage_file) {
             Ok((_pack_name, cov)) => cov,
             Err(e) => {
-                eprintln!("Error parsing {}: {}", coverage_file, e);
+                error!("Error parsing {}: {}", coverage_file, e);
                 continue;
             }
         };
@@ -239,13 +239,13 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
             median_coverage,
         });
 
-        eprintln!(
-            "Loaded sample: {} ({} total nodes, {} non-zero, mean={:.2}, median={:.2})",
+        debug!(
+            "Loaded sample {} ({} nodes, mean={:.2} and median={:.2} coverage on {} non-zero nodes)",
             samples.last().unwrap().name,
             samples.last().unwrap().coverage.len(),
-            non_zero_count,
             mean_coverage,
-            median_coverage
+            median_coverage,
+            non_zero_count
         );
     }
 
@@ -329,20 +329,28 @@ fn write_zygosity_matrix(
         writeln!(file)?;
     }
 
-    eprintln!("Wrote zygosity matrix to {}", output_path);
     Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
+    // Set log level based on verbosity
+    env_logger::Builder::new()
+        .filter_level(match args.verbose {
+            0 => log::LevelFilter::Error,
+            1 => log::LevelFilter::Info,
+            _ => log::LevelFilter::Debug,
+        })
+        .init();
+
     if args.ploidy != 1 && args.ploidy != 2 {
-        eprintln!("Error: Ploidy must be 1 or 2");
+        error!("Ploidy must be 1 or 2");
         std::process::exit(1);
     }
 
     if args.norm_method != "mean" && args.norm_method != "median" {
-        eprintln!("Error: Method must be 'mean' or 'median'");
+        error!("Method must be 'mean' or 'median'");
         std::process::exit(1);
     }
 
@@ -351,25 +359,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let values: Vec<&str> = t.split(',').collect();
         if args.ploidy == 1 {
             if values.len() != 1 {
-                eprintln!("Error: Ploidy 1 requires a single threshold value (e.g., --calling-thresholds 0.5)");
+                error!(
+                    "Ploidy 1 requires a single threshold value (e.g., --calling-thresholds 0.5)"
+                );
                 std::process::exit(1);
             }
             let threshold = values[0].parse::<f64>().unwrap_or_else(|_| {
-                eprintln!("Error: Invalid threshold value: {}", values[0]);
+                error!("Invalid threshold value: {}", values[0]);
                 std::process::exit(1);
             });
             (threshold, 0.25, 0.75) // het values don't matter for ploidy 1
         } else {
             if values.len() != 2 {
-                eprintln!("Error: Ploidy 2 requires two comma-separated threshold values (e.g., --calling-thresholds 0.25,0.75)");
+                error!(
+                    "Ploidy 2 requires two comma-separated threshold values (e.g., --calling-thresholds 0.25,0.75)"
+                );
                 std::process::exit(1);
             }
             let lower = values[0].parse::<f64>().unwrap_or_else(|_| {
-                eprintln!("Error: Invalid lower threshold value: {}", values[0]);
+                error!("Invalid lower threshold value: {}", values[0]);
                 std::process::exit(1);
             });
             let upper = values[1].parse::<f64>().unwrap_or_else(|_| {
-                eprintln!("Error: Invalid upper threshold value: {}", values[1]);
+                error!("Invalid upper threshold value: {}", values[1]);
                 std::process::exit(1);
             });
             (0.5, lower, upper) // haploid value doesn't matter for ploidy 2
@@ -379,23 +391,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (0.5, 0.25, 0.75)
     };
 
-    eprintln!("Pangosity - Node coverage to zygosity matrix");
-    eprintln!("Input: {}", args.sample_table);
-    eprintln!("Ploidy: {}", args.ploidy);
-    eprintln!("Method: {}", args.norm_method);
-    eprintln!("Min coverage: {}", args.min_coverage);
+    debug!("Input: {}", args.sample_table);
+    debug!("Output: {}", args.genotype_matrix);
+    debug!("Ploidy: {}", args.ploidy);
+    debug!("Normalization method: {}", args.norm_method);
     if args.ploidy == 1 {
-        eprintln!("Haploid threshold: {}", haploid_threshold);
+        debug!("Calling threshold: {}", haploid_threshold);
     } else {
-        eprintln!("Diploid thresholds: {}, {}", het_lower, het_upper);
+        debug!("Calling thresholds: {}, {}", het_lower, het_upper);
     }
-    eprintln!();
+    if args.min_coverage > 0.0 {
+        debug!("Minimum coverage: {}", args.min_coverage);
+    }
 
     // Load samples
+    info!("Loading samples from {}", args.sample_table);
     let samples = load_samples(&args.sample_table, &args.norm_method)?;
-    eprintln!("\nLoaded {} samples", samples.len());
+    info!("Loaded {} samples", samples.len());
 
     // Write zygosity matrix
+    info!("Writing genotype matrix to {}", &args.genotype_matrix);
     write_zygosity_matrix(
         &samples,
         &args.genotype_matrix,
@@ -407,6 +422,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         haploid_threshold,
     )?;
 
-    eprintln!("\nDone!");
+    info!("Done!");
     Ok(())
 }
