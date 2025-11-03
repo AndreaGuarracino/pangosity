@@ -35,6 +35,10 @@ struct Args {
     /// Verbosity level (0 = error, 1 = info, 2 = debug)
     #[arg(short, long, default_value = "1")]
     verbose: u8,
+
+    /// Output file for node coverage filter mask (1 = keep, 0 = filter)
+    #[arg(long)]
+    node_filter_mask: Option<String>,
 }
 
 /// Sample coverage data
@@ -252,6 +256,73 @@ fn load_samples(input_file: &str, _method: &str) -> std::io::Result<Vec<Sample>>
     Ok(samples)
 }
 
+/// Compute node-level coverage filter mask using IQR method
+/// Returns a vector where 1 = keep node, 0 = filter node
+fn compute_node_filter_mask(samples: &[Sample]) -> Vec<u8> {
+    if samples.is_empty() {
+        return Vec::new();
+    }
+
+    let num_nodes = samples[0].coverage.len();
+    let mut node_mean_coverages = vec![0.0; num_nodes];
+
+    // Compute mean coverage for each node across all samples
+    for node_idx in 0..num_nodes {
+        let mut sum = 0.0;
+        for sample in samples {
+            sum += sample.coverage[node_idx];
+        }
+        node_mean_coverages[node_idx] = sum / samples.len() as f64;
+    }
+
+    // Calculate quartiles and IQR
+    let mut sorted_coverages = node_mean_coverages.clone();
+    sorted_coverages.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let q1_idx = (sorted_coverages.len() as f64 * 0.25) as usize;
+    let q3_idx = (sorted_coverages.len() as f64 * 0.75) as usize;
+    let q1 = sorted_coverages[q1_idx];
+    let q3 = sorted_coverages[q3_idx];
+    let iqr = q3 - q1;
+
+    let lower_bound = q1 - 1.5 * iqr;
+    let upper_bound = q3 + 1.5 * iqr;
+
+    // Create mask
+    let mask: Vec<u8> = node_mean_coverages
+        .iter()
+        .map(|&cov| {
+            if cov >= lower_bound && cov <= upper_bound {
+                1
+            } else {
+                0
+            }
+        })
+        .collect();
+
+    let filtered_count = mask.iter().filter(|&&m| m == 0).count();
+    debug!(
+        "Node filter IQR: Q1={:.2}, Q3={:.2}, IQR={:.2}, bounds=[{:.2}, {:.2}]",
+        q1, q3, iqr, lower_bound, upper_bound
+    );
+    debug!(
+        "Node filtering: {} nodes kept, {} filtered",
+        num_nodes - filtered_count,
+        filtered_count
+    );
+
+    mask
+}
+
+/// Write node filter mask to output file
+fn write_node_filter_mask(mask: &[u8], output_path: &str) -> std::io::Result<()> {
+    let mut file = File::create(output_path)?;
+    for &m in mask {
+        writeln!(file, "{}", m)?;
+    }
+    Ok(())
+}
+
 /// Write zygosity matrix to output file
 fn write_zygosity_matrix(
     samples: &[Sample],
@@ -407,7 +478,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load samples
     info!("Loading samples from {}", args.sample_table);
     let samples = load_samples(&args.sample_table, &args.norm_method)?;
-    info!("Loaded {} samples", samples.len());
+    debug!("Loaded {} samples", samples.len());
+
+    // Generate and write node filter mask if requested
+    if let Some(ref mask_path) = args.node_filter_mask {
+        info!("Writing node filter mask to {}", mask_path);
+        let mask = compute_node_filter_mask(&samples);
+        write_node_filter_mask(&mask, mask_path)?;
+    }
 
     // Write zygosity matrix
     info!("Writing genotype matrix to {}", &args.genotype_matrix);

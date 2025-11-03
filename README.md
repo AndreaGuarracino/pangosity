@@ -42,6 +42,7 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 - `--min-coverage`: Minimum coverage [default: 0.0]
 - `-t, --calling-thresholds`: Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.5 / 0.25,0.75]
 - `-v, --verbose`: Verbosity level: 0 (error), 1 (info), 2 (debug) [default: 1]
+- `--node-filter-mask`: Output file for node coverage filter mask (1 = keep, 0 = filter outliers)
 
 ### Output
 
@@ -56,15 +57,27 @@ Tab-separated genotype matrix:
 
 **Diploid** (ploidy=2): `0/0` (absent), `0/1` (heterozygous), `1/1` (present), `./.` (missing)
 
-## Genotype Calling
+## Genotype calling
 
 Genotypes are called using coverage thresholds relative to each sample's mean or median coverage (non-zero values only).
 
 - **Haploid (ploidy 1)**: `coverage < t×ref → 0`, `coverage ≥ t×ref → 1` (default `t=0.5`)
-
 - **Diploid (ploidy 2)**: `coverage < L×ref → 0/0`, `L×ref ≤ coverage < U×ref → 0/1`, `coverage ≥ U×ref → 1/1` (default `L=0.25, U=0.75`)
 
-Customize with `-t`: `--calling-thresholds 0.6` (ploidy 1) or `--calling-thresholds 0.3,0.7` (ploidy 2).
+## Node coverage filtering
+
+Outlier detection for node coverage filtering:
+
+```bash
+pangosity -s samples.txt -g genotypes.tsv --node-filter-mask filter.txt
+```
+
+The filter:
+- Computes mean coverage for each node across all samples
+- Calculates Q1 (25th percentile) and Q3 (75th percentile)
+- Computes the Interquartile range (IQR) = Q3 - Q1
+- Sets bounds at Q1 - 1.5×IQR and Q3 + 1.5×IQR
+- Outputs mask file: `1` (keep node) or `0` (filter outlier), one value per line
 
 ## Example
 
