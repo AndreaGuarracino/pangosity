@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{BufReader, prelude::*};
 use std::path::Path;
 
-/// Pangosity: Call zygosity from node coverage vectors
+/// Pangenome-based zygosity matrices from graph coverage data.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -28,6 +28,10 @@ struct Args {
     /// Output dosage matrix file (0 and 1 if ploidy=1; 0,1,2 if ploidy=2)
     #[arg(short, long)]
     dosage_matrix: Option<String>,
+
+    /// Output dosage matrix file in BIMBAM format (variant,ref,alt,dosages...)
+    #[arg(long)]
+    dosage_bimbam: Option<String>,
 
     /// Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
     #[arg(long)]
@@ -487,6 +491,60 @@ fn write_dosage_matrix(
     Ok(())
 }
 
+/// Write dosage matrix in BIMBAM format for GEMMA
+/// Format: variant_id, ref_allele, alt_allele, dosage1, dosage2, dosage3, ...
+/// Missing dosages are written as "NA"
+fn write_dosage_bimbam(
+    samples: &[Sample],
+    output_path: &str,
+    ploidy: u8,
+    method: &str,
+    min_coverage: f64,
+    het_lower: f64,
+    het_upper: f64,
+    haploid_threshold: f64,
+) -> std::io::Result<()> {
+    if samples.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "No samples to write",
+        ));
+    }
+
+    let num_nodes = samples[0].coverage.len();
+    let mut file = File::create(output_path)?;
+
+    // Write BIMBAM format (no header)
+    // Each line: variant_id, ref_allele, alt_allele, dosage1, dosage2, ...
+    for node_idx in 0..num_nodes {
+        write!(file, "N{},A,T", node_idx + 1)?;
+
+        for sample in samples {
+            let ref_coverage = if method == "mean" {
+                sample.mean_coverage
+            } else {
+                sample.median_coverage
+            };
+
+            let coverage = sample.coverage[node_idx];
+            let zygosity = call_zygosity(
+                coverage,
+                ref_coverage,
+                ploidy,
+                min_coverage,
+                het_lower,
+                het_upper,
+                haploid_threshold,
+            );
+
+            write!(file, ",{}", zygosity.to_dosage(ploidy))?;
+        }
+        writeln!(file)?;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -506,8 +564,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
 
     // Validate at least one output is specified
-    if args.genotype_matrix.is_none() && args.dosage_matrix.is_none() {
-        error!("At least one output must be specified: --genotype-matrix or --dosage-matrix");
+    if args.genotype_matrix.is_none() && args.dosage_matrix.is_none() && args.dosage_bimbam.is_none() {
+        error!("At least one output must be specified: --genotype-matrix, --dosage-matrix, or --dosage-bimbam");
         std::process::exit(1);
     }
 
@@ -609,6 +667,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         write_dosage_matrix(
             &samples,
             dosage_path,
+            args.ploidy,
+            &args.norm_method,
+            args.min_coverage,
+            het_lower,
+            het_upper,
+            haploid_threshold,
+        )?;
+    }
+
+    // Write BIMBAM dosage matrix if requested
+    if let Some(ref bimbam_path) = args.dosage_bimbam {
+        info!("Writing dosage BIMBAM to {}", bimbam_path);
+        write_dosage_bimbam(
+            &samples,
+            bimbam_path,
             args.ploidy,
             &args.norm_method,
             args.min_coverage,

@@ -44,6 +44,7 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 - `-m, --norm-method`: Normalization method (mean or median) [default: median]
 - `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
 - `-d, --dosage-matrix`: Output dosage matrix file (0 and 1 if ploidy=1; 0,1,2 if ploidy=2)
+- `--dosage-bimbam`: Output dosage matrix file in BIMBAM format (variant,ref,alt,dosages...)
 - `--calling-thresholds`: Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
 - `--min-coverage`: Minimum coverage threshold (below: missing) [default: 0.0]
 - `--node-filter-mask`: Output file for node coverage filter mask (1=keep, 0=filter)
@@ -71,6 +72,19 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 
 - **Haploid** (ploidy=1): `0` (absent), `1` (present), `NA` (missing)
 - **Diploid** (ploidy=2): `0` (0/0), `1` (0/1), `2` (1/1), `NA` (missing)
+
+**BIMBAM dosage matrix** (comma-separated):
+```
+N,A,T,0,1,2
+N,A,T,1,2,0
+N,A,T,0,0,1
+```
+
+Format: `variant_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
+- No header row
+- Variants as rows, samples as columns
+- Alleles: A (reference), T (alternate)
+- Missing dosages written as `NA`
 
 ## Genotype calling
 
@@ -107,6 +121,27 @@ echo -e "sample1\tsample1.coverage.txt.gz\nsample2\tsample2.coverage.txt.gz" > s
 # Call genotypes
 pangosity -s samples.txt -g genotypes.tsv
 ```
+
+## GWAS with GEMMA
+
+For genome-wide association studies, pangosity can output dosage matrices in BIMBAM format:
+
+```bash
+# Generate BIMBAM dosage matrix for GEMMA
+pangosity -s samples.txt --bimbam-dosage dosages.bimbam
+
+# Create phenotype file (one value per line, matching sample order in samples.txt)
+echo -e "1.5\n2.3\n0.8" > phenotypes.txt
+
+# Run GEMMA
+# 1. Calculate kinship matrix
+gemma -g dosages.bimbam -p phenotypes.txt -gk 1 -o kinship
+
+# 2. Run linear mixed model association
+gemma -g dosages.bimbam -p phenotypes.txt -k output/kinship.cXX.txt -lmm 1 -o results
+```
+
+**BIMBAM format** is recognized automatically by GEMMA. The phenotype file must have one value per line, in the same order as samples appear in your sample table.
 
 ## License
 
