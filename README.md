@@ -35,11 +35,12 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 
 ### Parameters
 
-- `-s, --sample-table`: Sample table file (sample_name<tab>coverage_file)
-- `-g, --genotype-matrix`: Output genotype matrix file
-- `-p, --ploidy`: Ploidy level: 1 or 2 [default: 2]
+- `-s, --sample-table`: Sample table (sample_name<tab>coverage_file)
+- `-g, --genotype-matrix`: Output genotype matrix
+- `-p, --ploidy`: Ploidy: 1 or 2 [default: 2]
 - `-m, --norm-method`: Normalization: mean or median [default: median]
-- `--min-coverage`: Minimum coverage threshold [default: 0.0, so disabled]
+- `--min-coverage`: Minimum coverage [default: 0.0]
+- `-t, --calling-thresholds`: Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.5 / 0.25,0.75]
 
 ### Output
 
@@ -56,11 +57,13 @@ Tab-separated genotype matrix:
 
 ## Genotype Calling
 
-Genotypes are called using coverage thresholds relative to each sample's mean or median coverage (only non-zero values):
+Genotypes are called using coverage thresholds relative to each sample's mean or median coverage (non-zero values only).
 
-**Haploid**: `coverage < 0.5×ref → 0`, `coverage ≥ 0.5×ref → 1`
+- **Haploid (ploidy 1)**: `coverage < t×ref → 0`, `coverage ≥ t×ref → 1` (default `t=0.5`)
 
-**Diploid**: `coverage < 0.25×ref → 0/0`, `0.25×ref ≤ coverage < 0.75×ref → 0/1`, `coverage ≥ 0.75×ref → 1/1`
+- **Diploid (ploidy 2)**: `coverage < L×ref → 0/0`, `L×ref ≤ coverage < U×ref → 0/1`, `coverage ≥ U×ref → 1/1` (default `L=0.25, U=0.75`)
+
+Customize with `-t`: `--calling-thresholds 0.6` (ploidy 1) or `--calling-thresholds 0.3,0.7` (ploidy 2).
 
 ## Example
 

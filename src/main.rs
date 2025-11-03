@@ -7,11 +7,11 @@ use std::path::Path;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Tab-separated table: sample_name<tab>coverage_file (supports .gz)
+    /// Sample table file: sample_name<tab>coverage_file (supports .gz)
     #[arg(short, long)]
     sample_table: String,
 
-    /// Ploidy level (1 or 2)
+    /// Ploidy level: 1 or 2
     #[arg(short, long, default_value = "2")]
     ploidy: u8,
 
@@ -19,13 +19,17 @@ struct Args {
     #[arg(short = 'm', long, default_value = "median")]
     norm_method: String,
 
-    /// Output file path for genotype matrix
+    /// Output genotype matrix file
     #[arg(short, long)]
     genotype_matrix: String,
 
-    /// Minimum coverage threshold (below this: missing)
+    /// Minimum coverage threshold (below: missing)
     #[arg(long, default_value = "0.0")]
     min_coverage: f64,
+
+    /// Calling thresholds (ploidy 1: value; ploidy 2: lower,upper)
+    #[arg(short = 't', long)]
+    calling_thresholds: Option<String>,
 }
 
 /// Sample coverage data
@@ -154,40 +158,39 @@ fn compute_median(values: &[f64]) -> f64 {
 /// Call zygosity for a single node based on coverage and ploidy
 ///
 /// For ploidy 1:
-/// - coverage < 0.5 * ref_coverage = 0
-/// - coverage >= 0.5 * ref_coverage = 1
+/// - coverage < haploid_threshold * ref_coverage = 0
+/// - coverage >= haploid_threshold * ref_coverage = 1
 ///
 /// For ploidy 2:
-/// - coverage < 0.25 * ref_coverage = 0/0
-/// - 0.25 * ref_coverage <= coverage < 0.75 * ref_coverage = 0/1
-/// - coverage >= 0.75 * ref_coverage = 1/1
-///
-/// This is similar to the logic in gfa2bin where coverage relative to a threshold
-/// determines the genotype call
-fn call_zygosity(coverage: f64, ref_coverage: f64, ploidy: u8, min_cov: f64) -> Zygosity {
+/// - coverage < het_lower * ref_coverage = 0/0
+/// - het_lower * ref_coverage <= coverage < het_upper * ref_coverage = 0/1
+/// - coverage >= het_upper * ref_coverage = 1/1
+fn call_zygosity(
+    coverage: f64,
+    ref_coverage: f64,
+    ploidy: u8,
+    min_cov: f64,
+    het_lower: f64,
+    het_upper: f64,
+    haploid_threshold: f64,
+) -> Zygosity {
     if coverage < min_cov {
         return Zygosity::Missing;
     }
 
     if ploidy == 1 {
-        if coverage >= 0.5 * ref_coverage {
+        if coverage >= haploid_threshold * ref_coverage {
             Zygosity::HomAlt  // Present (1)
         } else {
             Zygosity::HomRef  // Absent (0)
         }
     } else if ploidy == 2 {
-        // Thresholds for diploid genotypes
-        // 0/0: very low coverage (< 0.25 * expected)
-        // 0/1: intermediate coverage (0.25-0.75 * expected for one copy)
-        // 1/1: high coverage (>= 0.75 * expected for two copies)
+        let threshold_lower = het_lower * ref_coverage;
+        let threshold_upper = het_upper * ref_coverage;
 
-        // Adjusted for ploidy 2: expected coverage for 1/1 is 2x the base
-        let het_lower = 0.25 * ref_coverage;
-        let het_upper = 0.75 * ref_coverage;
-
-        if coverage < het_lower {
+        if coverage < threshold_lower {
             Zygosity::HomRef  // 0/0
-        } else if coverage < het_upper {
+        } else if coverage < threshold_upper {
             Zygosity::Het     // 0/1
         } else {
             Zygosity::HomAlt  // 1/1
@@ -256,6 +259,9 @@ fn write_zygosity_matrix(
     ploidy: u8,
     method: &str,
     min_coverage: f64,
+    het_lower: f64,
+    het_upper: f64,
+    haploid_threshold: f64,
 ) -> std::io::Result<()> {
     if samples.is_empty() {
         return Err(std::io::Error::new(
@@ -302,7 +308,15 @@ fn write_zygosity_matrix(
             };
 
             let coverage = sample.coverage[node_idx];
-            let zygosity = call_zygosity(coverage, ref_coverage, ploidy, min_coverage);
+            let zygosity = call_zygosity(
+                coverage,
+                ref_coverage,
+                ploidy,
+                min_coverage,
+                het_lower,
+                het_upper,
+                haploid_threshold,
+            );
 
             let genotype = if ploidy == 1 {
                 zygosity.to_string_haploid()
@@ -332,11 +346,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
+    // Parse thresholds based on ploidy
+    let (haploid_threshold, het_lower, het_upper) = if let Some(ref t) = args.calling_thresholds {
+        let values: Vec<&str> = t.split(',').collect();
+        if args.ploidy == 1 {
+            if values.len() != 1 {
+                eprintln!("Error: Ploidy 1 requires a single threshold value (e.g., --calling-thresholds 0.5)");
+                std::process::exit(1);
+            }
+            let threshold = values[0].parse::<f64>().unwrap_or_else(|_| {
+                eprintln!("Error: Invalid threshold value: {}", values[0]);
+                std::process::exit(1);
+            });
+            (threshold, 0.25, 0.75) // het values don't matter for ploidy 1
+        } else {
+            if values.len() != 2 {
+                eprintln!("Error: Ploidy 2 requires two comma-separated threshold values (e.g., --calling-thresholds 0.25,0.75)");
+                std::process::exit(1);
+            }
+            let lower = values[0].parse::<f64>().unwrap_or_else(|_| {
+                eprintln!("Error: Invalid lower threshold value: {}", values[0]);
+                std::process::exit(1);
+            });
+            let upper = values[1].parse::<f64>().unwrap_or_else(|_| {
+                eprintln!("Error: Invalid upper threshold value: {}", values[1]);
+                std::process::exit(1);
+            });
+            (0.5, lower, upper) // haploid value doesn't matter for ploidy 2
+        }
+    } else {
+        // Default thresholds
+        (0.5, 0.25, 0.75)
+    };
+
     eprintln!("Pangosity - Node coverage to zygosity matrix");
     eprintln!("Input: {}", args.sample_table);
     eprintln!("Ploidy: {}", args.ploidy);
     eprintln!("Method: {}", args.norm_method);
     eprintln!("Min coverage: {}", args.min_coverage);
+    if args.ploidy == 1 {
+        eprintln!("Haploid threshold: {}", haploid_threshold);
+    } else {
+        eprintln!("Diploid thresholds: {}, {}", het_lower, het_upper);
+    }
     eprintln!();
 
     // Load samples
@@ -344,7 +396,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("\nLoaded {} samples", samples.len());
 
     // Write zygosity matrix
-    write_zygosity_matrix(&samples, &args.genotype_matrix, args.ploidy, &args.norm_method, args.min_coverage)?;
+    write_zygosity_matrix(
+        &samples,
+        &args.genotype_matrix,
+        args.ploidy,
+        &args.norm_method,
+        args.min_coverage,
+        het_lower,
+        het_upper,
+        haploid_threshold,
+    )?;
 
     eprintln!("\nDone!");
     Ok(())
