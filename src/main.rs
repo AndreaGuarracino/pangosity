@@ -29,16 +29,16 @@ struct Args {
     min_coverage: f64,
 
     /// Calling thresholds (ploidy 1: value; ploidy 2: lower,upper)
-    #[arg(short = 't', long)]
+    #[arg(short = 't', long, default_value = "0.25,0.75")]
     calling_thresholds: Option<String>,
-
-    /// Verbosity level (0 = error, 1 = info, 2 = debug)
-    #[arg(short, long, default_value = "1")]
-    verbose: u8,
 
     /// Output file for node coverage filter mask (1 = keep, 0 = filter)
     #[arg(long)]
     node_filter_mask: Option<String>,
+
+    /// Verbosity level (0 = error, 1 = info, 2 = debug)
+    #[arg(short, long, default_value = "1")]
+    verbose: u8,
 }
 
 /// Sample coverage data

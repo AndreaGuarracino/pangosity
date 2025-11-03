@@ -35,14 +35,14 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 
 ### Parameters
 
-- `-s, --sample-table`: Sample table (sample_name<tab>coverage_file)
-- `-g, --genotype-matrix`: Output genotype matrix
-- `-p, --ploidy`: Ploidy: 1 or 2 [default: 2]
-- `-m, --norm-method`: Normalization: mean or median [default: median]
-- `--min-coverage`: Minimum coverage [default: 0.0]
-- `-t, --calling-thresholds`: Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.5 / 0.25,0.75]
-- `-v, --verbose`: Verbosity level: 0 (error), 1 (info), 2 (debug) [default: 1]
-- `--node-filter-mask`: Output file for node coverage filter mask (1 = keep, 0 = filter outliers)
+- `-s, --sample-table`: Sample table file: sample_name<tab>coverage_file (supports .gz)
+- `-p, --ploidy`: Ploidy level: 1 or 2 [default: 2]
+- `-m, --norm-method`: Normalization method: mean or median [default: median]
+- `-g, --genotype-matrix`: Output genotype matrix file
+- `--min-coverage`: Minimum coverage threshold (below: missing) [default: 0.0]
+- `-t, --calling-thresholds`: Calling thresholds (ploidy 1: value; ploidy 2: lower,upper) [default: 0.25,0.75]
+- `--node-filter-mask`: Output file for node coverage filter mask (1 = keep, 0 = filter)
+- `-v, --verbose`: Verbosity level (0 = error, 1 = info, 2 = debug) [default: 1]
 
 ### Output
 
@@ -90,7 +90,7 @@ gafpack --gfa graph.gfa --gaf sample2.gaf --coverage-column --len-scale | gzip >
 echo -e "sample1\tsample1.coverage.txt.gz\nsample2\tsample2.coverage.txt.gz" > samples.txt
 
 # Call genotypes
-pangosity -s samples.txt -g genotypes.tsv -p 2 -m median
+pangosity -s samples.txt -g genotypes.tsv
 ```
 
 ## License
