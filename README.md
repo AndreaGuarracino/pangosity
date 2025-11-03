@@ -62,7 +62,7 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 - **Haploid** (ploidy=1): `0` (absent), `1` (present), `.` (missing)
 - **Diploid** (ploidy=2): `0/0` (absent), `0/1` (heterozygous), `1/1` (present), `./.` (missing)
 
-**Dosage matrix** (optional, tab-separated):
+**Dosage matrix** (tab-separated):
 ```
 #node   sample1     sample2     sample3
 1       0           1           2
