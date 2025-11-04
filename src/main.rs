@@ -1,24 +1,33 @@
 use clap::Parser;
 use log::{debug, error, info, warn};
+use pangosity::process_input_to_coverage;
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufReader, prelude::*};
-use std::path::Path;
 
 /// Pangenome-based zygosity matrices from graph coverage data.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None, disable_help_flag = true, disable_version_flag = true)]
 struct Args {
-    /// Sample table file: sample_name<tab>coverage_file (supports .gz)
+    /// Sample table file: sample_name<tab>input_file (supports PACK and GAF formats)
     #[arg(help_heading = "Input", short, long)]
     sample_table: String,
+
+    /// GFA pangenome graph file (required for GAF inputs)
+    #[arg(help_heading = "Input", short, long)]
+    gfa: Option<String>,
 
     /// Ploidy level (1 or 2)
     #[arg(help_heading = "Calling parameters", short, long, default_value = "2")]
     ploidy: u8,
 
     /// Normalization method (mean or median)
-    #[arg(help_heading = "Calling parameters", short = 'm', long, default_value = "median")]
+    #[arg(
+        help_heading = "Calling parameters",
+        short = 'm',
+        long,
+        default_value = "median"
+    )]
     norm_method: String,
 
     /// Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
@@ -116,62 +125,6 @@ impl Zygosity {
     }
 }
 
-/// Read a file with optional gzip decompression
-fn create_reader(path: &Path) -> std::io::Result<Box<dyn BufRead>> {
-    let file = File::open(path)?;
-    let (reader, _compression) = niffler::get_reader(Box::new(file)).unwrap();
-    Ok(Box::new(BufReader::new(reader)))
-}
-
-/// Parse a coverage file (from gafpack --coverage-column)
-fn parse_coverage_file(path: &str) -> std::io::Result<(String, Vec<f64>)> {
-    let file_path = Path::new(path);
-    let mut reader = create_reader(file_path)?;
-    let mut line = String::new();
-    let mut sample_name = String::new();
-    let mut coverage = Vec::new();
-
-    let mut has_sample_line = false;
-
-    loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        let line_str = line.trim();
-
-        if line_str.starts_with("##sample:") {
-            has_sample_line = true;
-            sample_name = line_str
-                .strip_prefix("##sample:")
-                .unwrap()
-                .trim()
-                .to_string();
-        } else if line_str.starts_with("#") {
-            // Skip header lines
-            continue;
-        } else if !line_str.is_empty()
-            && let Ok(value) = line_str.parse::<f64>() {
-                coverage.push(value);
-            }
-    }
-
-    // Validate that we got data
-    if !has_sample_line || coverage.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "Invalid coverage file: {}. Expected ##sample: header and coverage values",
-                path
-            ),
-        ));
-    }
-
-    Ok((sample_name, coverage))
-}
-
 /// Compute mean coverage (only non-zero values)
 fn compute_mean(values: &[f64]) -> f64 {
     let non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
@@ -242,9 +195,9 @@ fn call_zygosity(
 }
 
 /// Load all samples from input file list
-/// Each line should be: sample_name<tab>coverage_file_path
-/// Coverage files must be in tall format (one value per line) and can be gzip compressed
-fn load_samples(input_file: &str) -> std::io::Result<Vec<Sample>> {
+/// Each line should be: sample_name<tab>input_file_path
+/// Supports PACK and GAF formats (automatically detected)
+fn load_samples(input_file: &str, gfa_path: Option<&str>) -> std::io::Result<Vec<Sample>> {
     let file = File::open(input_file)?;
     let reader = BufReader::new(file);
     let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
@@ -259,12 +212,12 @@ fn load_samples(input_file: &str) -> std::io::Result<Vec<Sample>> {
             }
 
             let sample_name = fields[0].to_string();
-            let coverage_file = fields[1];
+            let input_file = fields[1];
 
-            let coverage = match parse_coverage_file(coverage_file) {
-                Ok((_pack_name, cov)) => cov,
+            let coverage = match process_input_to_coverage(input_file, gfa_path, &sample_name) {
+                Ok(cov) => cov,
                 Err(e) => {
-                    error!("Error parsing {}: {}", coverage_file, e);
+                    error!("Error processing {}: {}", input_file, e);
                     return None;
                 }
             };
@@ -571,8 +524,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
 
     // Validate at least one output is specified
-    if args.genotype_matrix.is_none() && args.dosage_matrix.is_none() && args.dosage_bimbam.is_none() {
-        error!("At least one output must be specified: --genotype-matrix, --dosage-matrix, or --dosage-bimbam");
+    if args.genotype_matrix.is_none()
+        && args.dosage_matrix.is_none()
+        && args.dosage_bimbam.is_none()
+    {
+        error!(
+            "At least one output must be specified: --genotype-matrix, --dosage-matrix, or --dosage-bimbam"
+        );
         std::process::exit(1);
     }
 
@@ -643,7 +601,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load samples
     info!("Loading samples from {}", args.sample_table);
-    let samples = load_samples(&args.sample_table)?;
+    let samples = load_samples(&args.sample_table, args.gfa.as_deref())?;
     debug!("Loaded {} samples", samples.len());
 
     // Generate and write feature coverage mask if requested

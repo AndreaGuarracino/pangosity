@@ -242,6 +242,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gafpack"
+version = "0.1.2"
+dependencies = [
+ "clap",
+ "flate2",
+ "niffler",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -375,6 +384,7 @@ dependencies = [
  "clap",
  "env_logger",
  "flate2",
+ "gafpack",
  "log",
  "niffler",
  "rayon",
