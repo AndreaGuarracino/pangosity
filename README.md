@@ -1,5 +1,9 @@
 # Pangosity
 
+<p align="center">
+  <img src="pangosity.png" alt="Pangosity Logo" width="400"/>
+</p>
+
 Pangenome-based zygosity matrices from coverage data.
 
 ## Installation
