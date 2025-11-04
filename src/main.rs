@@ -152,11 +152,10 @@ fn parse_coverage_file(path: &str) -> std::io::Result<(String, Vec<f64>)> {
         } else if line_str.starts_with("#") {
             // Skip header lines
             continue;
-        } else if !line_str.is_empty() {
-            if let Ok(value) = line_str.parse::<f64>() {
+        } else if !line_str.is_empty()
+            && let Ok(value) = line_str.parse::<f64>() {
                 coverage.push(value);
             }
-        }
     }
 
     // Validate that we got data
@@ -190,7 +189,7 @@ fn compute_median(values: &[f64]) -> f64 {
     }
     non_zero.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let mid = non_zero.len() / 2;
-    if non_zero.len() % 2 == 0 {
+    if non_zero.len().is_multiple_of(2) {
         (non_zero[mid - 1] + non_zero[mid]) / 2.0
     } else {
         non_zero[mid]
