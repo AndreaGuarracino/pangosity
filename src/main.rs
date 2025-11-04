@@ -26,7 +26,7 @@ fn detect_format(path: &str) -> std::io::Result<InputFormat> {
     // Check content for ambiguous cases
     let file = File::open(path)?;
     let (reader, _) = niffler::get_reader(Box::new(file))
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(|e| std::io::Error::other(e))?;
     let mut buf_reader = BufReader::new(reader);
     let mut line = String::new();
 
@@ -66,7 +66,7 @@ fn process_input_to_coverage(
                 .as_ref()
                 .expect("GFA data should be available for GAF input");
             gafpack::compute_coverage_with_segments(&gfa.0, gfa.1, input_path, true, false)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                .map_err(|e| std::io::Error::other(e))
         }
     }
 }
@@ -76,7 +76,7 @@ fn parse_coverage_file(path: &str) -> std::io::Result<(String, Vec<f64>)> {
     let file_path = std::path::Path::new(path);
     let file = File::open(file_path)?;
     let (reader, _compression) = niffler::get_reader(Box::new(file))
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(|e| std::io::Error::other(e))?;
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
     let mut sample_name = String::new();
@@ -371,7 +371,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if has_gaf {
             info!("Parsing GFA graph from {}", gfa_path);
             let gfa = gafpack::parse_gfa(gfa_path)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(|e| std::io::Error::other(e))?;
             debug!("Parsed GFA: {} segments, min_id={}", gfa.0.len(), gfa.1);
             Some(Arc::new(gfa))
         } else {
