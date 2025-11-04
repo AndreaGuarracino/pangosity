@@ -1,10 +1,10 @@
 use clap::Parser;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use log::{debug, error, info, warn};
 use rayon::prelude::*;
 use std::fs::File;
-use std::io::{prelude::*, BufReader};
+use std::io::{BufReader, prelude::*};
 use std::sync::Arc;
 
 /// Input file format
@@ -62,7 +62,9 @@ fn process_input_to_coverage(
         }
         InputFormat::Gaf => {
             // Convert GAF to coverage using pre-parsed segments
-            let gfa = gfa_data.as_ref().expect("GFA data should be available for GAF input");
+            let gfa = gfa_data
+                .as_ref()
+                .expect("GFA data should be available for GAF input");
             gafpack::compute_coverage_with_segments(&gfa.0, gfa.1, input_path, true, false)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         }
@@ -347,7 +349,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if has_gaf {
         info!("GAF input detected: coverage will be computed on-the-fly (slower than PACK)");
         if args.gfa.is_none() {
-            error!("GAF files detected in sample table but no GFA graph provided. Use --gfa to specify the graph file.");
+            error!(
+                "GAF files detected in sample table but no GFA graph provided. Use --gfa to specify the graph file."
+            );
             std::process::exit(1);
         }
     }
@@ -368,11 +372,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Parsing GFA graph from {}", gfa_path);
             let gfa = gafpack::parse_gfa(gfa_path)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-            debug!(
-                "Parsed GFA: {} segments, min_id={}",
-                gfa.0.len(),
-                gfa.1
-            );
+            debug!("Parsed GFA: {} segments, min_id={}", gfa.0.len(), gfa.1);
             Some(Arc::new(gfa))
         } else {
             warn!("No GAF files detected in sample table, skipping GFA parsing");
@@ -512,7 +512,9 @@ fn load_samples(
                 let content = gafpack::format_coverage_column(&sample_name, &coverage);
                 if let Ok(file) = File::create(&output_path) {
                     let mut encoder = GzEncoder::new(file, Compression::default());
-                    let _ = encoder.write_all(content.as_bytes()).and_then(|_| encoder.finish().map(|_| ()));
+                    let _ = encoder
+                        .write_all(content.as_bytes())
+                        .and_then(|_| encoder.finish().map(|_| ()));
                 }
             }
 
@@ -815,11 +817,7 @@ fn compute_mean(values: &[f64]) -> f64 {
         .iter()
         .filter(|&&x| x > 0.0)
         .fold((0.0, 0), |(sum, count), &x| (sum + x, count + 1));
-    if count == 0 {
-        0.0
-    } else {
-        sum / count as f64
-    }
+    if count == 0 { 0.0 } else { sum / count as f64 }
 }
 
 /// Compute median coverage (only non-zero values)
