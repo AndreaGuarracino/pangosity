@@ -191,8 +191,7 @@ struct Args {
 struct Sample {
     name: String,
     coverage: Vec<f64>,
-    mean_coverage: f64,
-    median_coverage: f64,
+    ref_coverage: f64,
 }
 
 /// Zygosity genotype for diploid
@@ -239,7 +238,6 @@ impl Zygosity {
         }
     }
 }
-
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -360,7 +358,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load samples
     info!("Loading samples from {}", args.sample_table);
-    let samples = load_samples(&args.sample_table, &gfa_data)?;
+    let samples = load_samples(&args.sample_table, &gfa_data, &args.norm_method)?;
     debug!("Loaded {} samples", samples.len());
 
     // Generate and write feature coverage mask if requested
@@ -377,7 +375,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &samples,
             genotype_path,
             args.ploidy,
-            &args.norm_method,
             args.min_coverage,
             het_lower,
             het_upper,
@@ -392,7 +389,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &samples,
             dosage_path,
             args.ploidy,
-            &args.norm_method,
             args.min_coverage,
             het_lower,
             het_upper,
@@ -407,7 +403,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &samples,
             bimbam_path,
             args.ploidy,
-            &args.norm_method,
             args.min_coverage,
             het_lower,
             het_upper,
@@ -444,6 +439,7 @@ fn has_gaf_files(sample_table: &str) -> std::io::Result<bool> {
 fn load_samples(
     input_file: &str,
     gfa_data: &Option<Arc<(Vec<usize>, usize)>>,
+    norm_method: &str,
 ) -> std::io::Result<Vec<Sample>> {
     let file = File::open(input_file)?;
     let reader = BufReader::new(file);
@@ -469,24 +465,26 @@ fn load_samples(
                 }
             };
 
-            let mean_coverage = compute_mean(&coverage);
-            let median_coverage = compute_median(&coverage);
+            let ref_coverage = if norm_method == "mean" {
+                compute_mean(&coverage)
+            } else {
+                compute_median(&coverage)
+            };
             let non_zero_count = coverage.iter().filter(|&&x| x > 0.0).count();
 
             debug!(
-                "Loaded sample {} ({} features, mean={:.2} and median={:.2} coverage on {} non-zero features)",
+                "Loaded sample {} ({} features, {}={:.2} coverage on {} non-zero features)",
                 sample_name,
                 coverage.len(),
-                mean_coverage,
-                median_coverage,
+                norm_method,
+                ref_coverage,
                 non_zero_count
             );
 
             Some(Sample {
                 name: sample_name,
                 coverage,
-                mean_coverage,
-                median_coverage,
+                ref_coverage,
             })
         })
         .collect();
@@ -610,7 +608,6 @@ fn write_zygosity_matrix(
     samples: &[Sample],
     output_path: &str,
     ploidy: u8,
-    method: &str,
     min_coverage: f64,
     het_lower: f64,
     het_upper: f64,
@@ -654,16 +651,10 @@ fn write_zygosity_matrix(
         write!(file, "{}", feature_idx + 1)?;
 
         for sample in samples {
-            let ref_coverage = if method == "mean" {
-                sample.mean_coverage
-            } else {
-                sample.median_coverage
-            };
-
             let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
-                ref_coverage,
+                sample.ref_coverage,
                 ploidy,
                 min_coverage,
                 het_lower,
@@ -690,7 +681,6 @@ fn write_dosage_matrix(
     samples: &[Sample],
     output_path: &str,
     ploidy: u8,
-    method: &str,
     min_coverage: f64,
     het_lower: f64,
     het_upper: f64,
@@ -718,16 +708,10 @@ fn write_dosage_matrix(
         write!(file, "{}", feature_idx + 1)?;
 
         for sample in samples {
-            let ref_coverage = if method == "mean" {
-                sample.mean_coverage
-            } else {
-                sample.median_coverage
-            };
-
             let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
-                ref_coverage,
+                sample.ref_coverage,
                 ploidy,
                 min_coverage,
                 het_lower,
@@ -750,7 +734,6 @@ fn write_dosage_bimbam(
     samples: &[Sample],
     output_path: &str,
     ploidy: u8,
-    method: &str,
     min_coverage: f64,
     het_lower: f64,
     het_upper: f64,
@@ -772,16 +755,10 @@ fn write_dosage_bimbam(
         write!(file, "N{},A,T", feature_idx + 1)?;
 
         for sample in samples {
-            let ref_coverage = if method == "mean" {
-                sample.mean_coverage
-            } else {
-                sample.median_coverage
-            };
-
             let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
-                ref_coverage,
+                sample.ref_coverage,
                 ploidy,
                 min_coverage,
                 het_lower,
