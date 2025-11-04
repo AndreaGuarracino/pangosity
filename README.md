@@ -1,7 +1,7 @@
 # Pangosity
 
 <p align="center">
-  <img src="pangosity.png" alt="Pangosity Logo" width="400"/>
+  <img src="pangosity.png" alt="Pangosity"/>
 </p>
 
 Pangenome-based zygosity matrices from coverage data.
