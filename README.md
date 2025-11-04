@@ -1,6 +1,6 @@
 # Pangosity
 
-Pangenome-based zygosity matrices from graph coverage data.
+Pangenome-based zygosity matrices from coverage data.
 
 ## Installation
 
@@ -30,7 +30,7 @@ sample1	sample1.coverage.txt.gz
 sample2	sample2.coverage.txt.gz
 ```
 
-Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
+Coverage files in tall format (supports `.gz`):
 ```
 ##sample: sample_name
 #coverage
@@ -38,6 +38,8 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 234.56
 ...
 ```
+
+Example sources: `gafpack --coverage-column` (nodes).
 
 ### Parameters
 
@@ -53,8 +55,8 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 **Output:**
 - `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
 - `-d, --dosage-matrix`: Output dosage matrix file (0,1 if ploidy=1; 0,1,2 if ploidy=2)
-- `-b, --dosage-bimbam`: Output dosage matrix file in BIMBAM format (variant,ref,alt,dosages...)
-- `--node-cov-mask`: Output node coverage mask file (1=keep, 0=filter outliers)
+- `-b, --dosage-bimbam`: Output dosage matrix file in BIMBAM format (feature,ref,alt,dosages...)
+- `--feature-cov-mask`: Output feature coverage mask file (1=keep, 0=filter outliers)
 
 **General:**
 - `-t, --threads`: Number of threads for parallel processing [default: 4]
@@ -66,9 +68,9 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 
 **Genotype matrix** (tab-separated):
 ```
-#node   sample1     sample2     sample3
-1       0/0         0/1         1/1
-2       0/1         1/1         0/0
+#feature   sample1     sample2     sample3
+1          0/0         0/1         1/1
+2          0/1         1/1         0/0
 ```
 
 - **Haploid** (ploidy=1): `0` (absent), `1` (present), `.` (missing)
@@ -76,9 +78,9 @@ Coverage files in tall format from `gafpack --coverage-column` (supports .gz):
 
 **Dosage matrix** (tab-separated):
 ```
-#node   sample1     sample2     sample3
-1       0           1           2
-2       1           2           0
+#feature   sample1     sample2     sample3
+1          0           1           2
+2          1           2           0
 ```
 
 - **Haploid** (ploidy=1): `0` (absent), `1` (present), `NA` (missing)
@@ -91,9 +93,9 @@ N2,A,T,1,2,0
 N3,A,T,0,0,1
 ```
 
-Format: `variant_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
+Format: `feature_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
 - No header row
-- Variants as rows, samples as columns
+- Features as rows, samples as columns
 - Alleles: A (reference), T (alternate)
 - Missing dosages written as `NA`
 
@@ -104,20 +106,20 @@ Genotypes are called using coverage thresholds relative to each sample's mean or
 - **Haploid (ploidy 1)**: `coverage < t×ref → 0`, `coverage ≥ t×ref → 1` (default `t=0.5`)
 - **Diploid (ploidy 2)**: `coverage < L×ref → 0/0`, `L×ref ≤ coverage < U×ref → 0/1`, `coverage ≥ U×ref → 1/1` (default `L=0.25, U=0.75`)
 
-## Node coverage filtering
+## Feature coverage filtering
 
-Outlier detection for node coverage filtering:
+Outlier detection using IQR method:
 
 ```bash
-pangosity -s samples.txt -g genotypes.tsv --node-cov-mask coverage_mask.txt
+pangosity -s samples.txt -g genotypes.tsv --feature-cov-mask coverage_mask.txt
 ```
 
 The filter:
-- Computes mean coverage for each node across all samples
+- Computes mean coverage for each feature across all samples
 - Calculates Q1 (25th percentile) and Q3 (75th percentile)
 - Computes the Interquartile range (IQR) = Q3 - Q1
 - Sets bounds at Q1 - 1.5×IQR and Q3 + 1.5×IQR
-- Outputs mask file: `1` (keep node) or `0` (filter outlier), one value per line
+- Outputs mask file: `1` (keep feature) or `0` (filter outlier), one value per line
 
 ## Example
 

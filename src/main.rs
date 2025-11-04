@@ -41,9 +41,9 @@ struct Args {
     #[arg(help_heading = "Output", short = 'b', long)]
     dosage_bimbam: Option<String>,
 
-    /// Output node coverage mask file (1=keep, 0=filter outliers)
+    /// Output feature coverage mask file (1=keep, 0=filter outliers)
     #[arg(help_heading = "Output", long)]
-    node_cov_mask: Option<String>,
+    feature_cov_mask: Option<String>,
 
     /// Number of threads for parallel processing
     #[arg(help_heading = "General", short, long, default_value = "4")]
@@ -197,7 +197,7 @@ fn compute_median(values: &[f64]) -> f64 {
     }
 }
 
-/// Call zygosity for a single node based on coverage and ploidy
+/// Call zygosity for a single feature based on coverage and ploidy
 ///
 /// For ploidy 1:
 /// - coverage < haploid_threshold * ref_coverage = 0
@@ -275,7 +275,7 @@ fn load_samples(input_file: &str) -> std::io::Result<Vec<Sample>> {
             let non_zero_count = coverage.iter().filter(|&&x| x > 0.0).count();
 
             debug!(
-                "Loaded sample {} ({} nodes, mean={:.2} and median={:.2} coverage on {} non-zero nodes)",
+                "Loaded sample {} ({} features, mean={:.2} and median={:.2} coverage on {} non-zero features)",
                 sample_name,
                 coverage.len(),
                 mean_coverage,
@@ -295,26 +295,26 @@ fn load_samples(input_file: &str) -> std::io::Result<Vec<Sample>> {
     Ok(samples)
 }
 
-/// Compute node-level coverage filter mask using IQR method
-/// Returns a vector where 1 = keep node, 0 = filter node
-fn compute_node_filter_mask(samples: &[Sample]) -> Vec<u8> {
+/// Compute feature-level coverage filter mask using IQR method
+/// Returns a vector where 1 = keep feature, 0 = filter feature
+fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
     if samples.is_empty() {
         return Vec::new();
     }
 
-    let num_nodes = samples[0].coverage.len();
+    let num_features = samples[0].coverage.len();
 
-    // Compute mean coverage for each node across all samples (parallel)
-    let node_mean_coverages: Vec<f64> = (0..num_nodes)
+    // Compute mean coverage for each feature across all samples (parallel)
+    let feature_mean_coverages: Vec<f64> = (0..num_features)
         .into_par_iter()
-        .map(|node_idx| {
-            let sum: f64 = samples.iter().map(|s| s.coverage[node_idx]).sum();
+        .map(|feature_idx| {
+            let sum: f64 = samples.iter().map(|s| s.coverage[feature_idx]).sum();
             sum / samples.len() as f64
         })
         .collect();
 
     // Calculate quartiles and IQR
-    let mut sorted_coverages = node_mean_coverages.clone();
+    let mut sorted_coverages = feature_mean_coverages.clone();
     sorted_coverages.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     let q1_idx = (sorted_coverages.len() as f64 * 0.25) as usize;
@@ -327,7 +327,7 @@ fn compute_node_filter_mask(samples: &[Sample]) -> Vec<u8> {
     let upper_bound = q3 + 1.5 * iqr;
 
     // Create mask
-    let mask: Vec<u8> = node_mean_coverages
+    let mask: Vec<u8> = feature_mean_coverages
         .par_iter()
         .map(|&cov| {
             if cov >= lower_bound && cov <= upper_bound {
@@ -340,20 +340,20 @@ fn compute_node_filter_mask(samples: &[Sample]) -> Vec<u8> {
 
     let filtered_count = mask.iter().filter(|&&m| m == 0).count();
     debug!(
-        "Node filter IQR: Q1={:.2}, Q3={:.2}, IQR={:.2}, bounds=[{:.2}, {:.2}]",
+        "Feature filter IQR: Q1={:.2}, Q3={:.2}, IQR={:.2}, bounds=[{:.2}, {:.2}]",
         q1, q3, iqr, lower_bound, upper_bound
     );
     debug!(
-        "Node filtering: {} nodes kept, {} filtered",
-        num_nodes - filtered_count,
+        "Feature filtering: {} features kept, {} filtered",
+        num_features - filtered_count,
         filtered_count
     );
 
     mask
 }
 
-/// Write node filter mask to output file
-fn write_node_filter_mask(mask: &[u8], output_path: &str) -> std::io::Result<()> {
+/// Write feature filter mask to output file
+fn write_feature_filter_mask(mask: &[u8], output_path: &str) -> std::io::Result<()> {
     let mut file = File::create(output_path)?;
     for &m in mask {
         writeln!(file, "{}", m)?;
@@ -379,18 +379,18 @@ fn write_zygosity_matrix(
         ));
     }
 
-    let num_nodes = samples[0].coverage.len();
+    let num_features = samples[0].coverage.len();
 
-    // Check all samples have the same number of nodes
+    // Check all samples have the same number of features
     for sample in samples {
-        if sample.coverage.len() != num_nodes {
+        if sample.coverage.len() != num_features {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "Sample {} has {} nodes, expected {}",
+                    "Sample {} has {} features, expected {}",
                     sample.name,
                     sample.coverage.len(),
-                    num_nodes
+                    num_features
                 ),
             ));
         }
@@ -399,15 +399,15 @@ fn write_zygosity_matrix(
     let mut file = File::create(output_path)?;
 
     // Write header
-    write!(file, "#node")?;
+    write!(file, "#feature")?;
     for sample in samples {
         write!(file, "\t{}", sample.name)?;
     }
     writeln!(file)?;
 
-    // Write zygosity for each node (1-based to match gafpack node.1, node.2, etc.)
-    for node_idx in 0..num_nodes {
-        write!(file, "{}", node_idx + 1)?;
+    // Write zygosity for each feature (1-based indexing)
+    for feature_idx in 0..num_features {
+        write!(file, "{}", feature_idx + 1)?;
 
         for sample in samples {
             let ref_coverage = if method == "mean" {
@@ -416,7 +416,7 @@ fn write_zygosity_matrix(
                 sample.median_coverage
             };
 
-            let coverage = sample.coverage[node_idx];
+            let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
                 ref_coverage,
@@ -459,19 +459,19 @@ fn write_dosage_matrix(
         ));
     }
 
-    let num_nodes = samples[0].coverage.len();
+    let num_features = samples[0].coverage.len();
     let mut file = File::create(output_path)?;
 
     // Write header
-    write!(file, "#node")?;
+    write!(file, "#feature")?;
     for sample in samples {
         write!(file, "\t{}", sample.name)?;
     }
     writeln!(file)?;
 
-    // Write dosage for each node
-    for node_idx in 0..num_nodes {
-        write!(file, "{}", node_idx + 1)?;
+    // Write dosage for each feature
+    for feature_idx in 0..num_features {
+        write!(file, "{}", feature_idx + 1)?;
 
         for sample in samples {
             let ref_coverage = if method == "mean" {
@@ -480,7 +480,7 @@ fn write_dosage_matrix(
                 sample.median_coverage
             };
 
-            let coverage = sample.coverage[node_idx];
+            let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
                 ref_coverage,
@@ -519,13 +519,13 @@ fn write_dosage_bimbam(
         ));
     }
 
-    let num_nodes = samples[0].coverage.len();
+    let num_features = samples[0].coverage.len();
     let mut file = File::create(output_path)?;
 
     // Write BIMBAM format (no header)
-    // Each line: variant_id, ref_allele, alt_allele, dosage1, dosage2, ...
-    for node_idx in 0..num_nodes {
-        write!(file, "N{},A,T", node_idx + 1)?;
+    // Each line: feature_id, ref_allele, alt_allele, dosage1, dosage2, ...
+    for feature_idx in 0..num_features {
+        write!(file, "N{},A,T", feature_idx + 1)?;
 
         for sample in samples {
             let ref_coverage = if method == "mean" {
@@ -534,7 +534,7 @@ fn write_dosage_bimbam(
                 sample.median_coverage
             };
 
-            let coverage = sample.coverage[node_idx];
+            let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
                 ref_coverage,
@@ -647,11 +647,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let samples = load_samples(&args.sample_table)?;
     debug!("Loaded {} samples", samples.len());
 
-    // Generate and write node coverage mask if requested
-    if let Some(ref mask_path) = args.node_cov_mask {
-        info!("Writing node coverage mask to {}", mask_path);
-        let mask = compute_node_filter_mask(&samples);
-        write_node_filter_mask(&mask, mask_path)?;
+    // Generate and write feature coverage mask if requested
+    if let Some(ref mask_path) = args.feature_cov_mask {
+        info!("Writing feature coverage mask to {}", mask_path);
+        let mask = compute_feature_filter_mask(&samples);
+        write_feature_filter_mask(&mask, mask_path)?;
     }
 
     // Write genotype matrix if requested
