@@ -1,4 +1,6 @@
 use clap::Parser;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use log::{debug, error, info, warn};
 use rayon::prelude::*;
 use std::fs::File;
@@ -343,16 +345,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Validate sample table and check if GAF files are present
     let has_gaf = validate_sample_table(&args.sample_table)?;
     if has_gaf {
-        warn!("GAF input detected: coverage will be computed on-the-fly (slower than PACK)");
+        info!("GAF input detected: coverage will be computed on-the-fly (slower than PACK)");
         if args.gfa.is_none() {
             error!("GAF files detected in sample table but no GFA graph provided. Use --gfa to specify the graph file.");
             std::process::exit(1);
         }
     }
 
-    // Create coverage output directory if specified
+    // Create coverage output directory only if GAF files are present
     if let Some(ref dir) = args.save_coverage {
-        if let Err(e) = std::fs::create_dir_all(dir) {
+        if !has_gaf {
+            warn!("--save-coverage specified but no GAF files detected.");
+        } else if let Err(e) = std::fs::create_dir_all(dir) {
             error!("Failed to create coverage directory '{}': {}", dir, e);
             std::process::exit(1);
         }
@@ -504,10 +508,11 @@ fn load_samples(
             );
 
             if let Some(dir) = save_coverage_dir {
-                let output_path = format!("{}/{}.pack", dir, sample_name);
+                let output_path = format!("{}/{}.pack.gz", dir, sample_name);
                 let content = gafpack::format_coverage_column(&sample_name, &coverage);
-                if let Err(e) = std::fs::write(&output_path, content) {
-                    warn!("Failed to save coverage for {}: {}", sample_name, e);
+                if let Ok(file) = File::create(&output_path) {
+                    let mut encoder = GzEncoder::new(file, Compression::default());
+                    let _ = encoder.write_all(content.as_bytes()).and_then(|_| encoder.finish().map(|_| ()));
                 }
             }
 
