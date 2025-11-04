@@ -54,10 +54,6 @@ Coverage files in tall format:
 ...
 ```
 
-Example sources:
-- PACK: `gafpack --coverage-column` (nodes)
-- GAF: Any GAF alignment file against the graph
-
 ### Parameters
 
 **Input:**
