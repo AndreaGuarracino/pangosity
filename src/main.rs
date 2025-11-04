@@ -1,9 +1,124 @@
 use clap::Parser;
 use log::{debug, error, info, warn};
-use pangosity::process_input_to_coverage;
 use rayon::prelude::*;
 use std::fs::File;
-use std::io::{BufReader, prelude::*};
+use std::io::{prelude::*, BufReader};
+use std::sync::Arc;
+
+/// Input file format
+#[derive(Debug, PartialEq)]
+enum InputFormat {
+    Pack, // Coverage file (PACK format)
+    Gaf,  // GAF alignment file
+}
+
+/// Detect input format based on file extension and content
+fn detect_format(path: &str) -> std::io::Result<InputFormat> {
+    let path_lower = path.to_lowercase();
+
+    // Check extension first
+    if path_lower.ends_with(".gaf") || path_lower.ends_with(".gaf.gz") {
+        return Ok(InputFormat::Gaf);
+    }
+
+    // Check content for ambiguous cases
+    let file = File::open(path)?;
+    let (reader, _) = niffler::get_reader(Box::new(file))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut buf_reader = BufReader::new(reader);
+    let mut line = String::new();
+
+    buf_reader.read_line(&mut line)?;
+
+    if line.starts_with("##sample:") {
+        Ok(InputFormat::Pack)
+    } else if !line.is_empty() {
+        // Check if it's GAF by looking for graph path with > or < characters
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() >= 6 && (fields[5].contains('>') || fields[5].contains('<')) {
+            Ok(InputFormat::Gaf)
+        } else {
+            Ok(InputFormat::Pack) // Default fallback
+        }
+    } else {
+        Ok(InputFormat::Pack)
+    }
+}
+
+/// Process input file using pre-parsed GFA segments (efficient for parallel processing)
+fn process_input_to_coverage(
+    input_path: &str,
+    gfa_data: &Option<Arc<(Vec<usize>, usize)>>,
+) -> std::io::Result<Vec<f64>> {
+    let format = detect_format(input_path)?;
+    debug!("Detected format for {}: {:?}", input_path, format);
+
+    match format {
+        InputFormat::Pack => {
+            // Read PACK format directly
+            parse_coverage_file(input_path).map(|(_, cov)| cov)
+        }
+        InputFormat::Gaf => {
+            // Convert GAF to coverage using pre-parsed segments
+            let gfa = gfa_data.as_ref().expect("GFA data should be available for GAF input");
+            gafpack::compute_coverage_with_segments(&gfa.0, gfa.1, input_path, true, false)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        }
+    }
+}
+
+/// Parse a coverage file (from gafpack --coverage-column)
+fn parse_coverage_file(path: &str) -> std::io::Result<(String, Vec<f64>)> {
+    let file_path = std::path::Path::new(path);
+    let file = File::open(file_path)?;
+    let (reader, _compression) = niffler::get_reader(Box::new(file))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+    let mut sample_name = String::new();
+    let mut coverage = Vec::new();
+
+    let mut has_sample_line = false;
+
+    loop {
+        line.clear();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let line_str = line.trim();
+
+        if line_str.starts_with("##sample:") {
+            has_sample_line = true;
+            sample_name = line_str
+                .strip_prefix("##sample:")
+                .unwrap()
+                .trim()
+                .to_string();
+        } else if line_str.starts_with("#") {
+            // Skip header lines
+            continue;
+        } else if !line_str.is_empty()
+            && let Ok(value) = line_str.parse::<f64>()
+        {
+            coverage.push(value);
+        }
+    }
+
+    // Validate that we got data
+    if !has_sample_line || coverage.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "Invalid coverage file: {}. Expected ##sample: header and coverage values",
+                path
+            ),
+        ));
+    }
+
+    Ok((sample_name, coverage))
+}
 
 /// Pangenome-based zygosity matrices from graph coverage data.
 #[derive(Parser, Debug)]
@@ -194,10 +309,32 @@ fn call_zygosity(
     }
 }
 
+/// Check if sample table contains any GAF files using format detection
+fn has_gaf_files(sample_table: &str) -> std::io::Result<bool> {
+    let file = File::open(sample_table)?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line?;
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() >= 2 {
+            let input_path = fields[1];
+            // Use detect_format to properly detect GAF files
+            if let Ok(InputFormat::Gaf) = detect_format(input_path) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Load all samples from input file list
 /// Each line should be: sample_name<tab>input_file_path
 /// Supports PACK and GAF formats (automatically detected)
-fn load_samples(input_file: &str, gfa_path: Option<&str>) -> std::io::Result<Vec<Sample>> {
+fn load_samples(
+    input_file: &str,
+    gfa_data: &Option<Arc<(Vec<usize>, usize)>>,
+) -> std::io::Result<Vec<Sample>> {
     let file = File::open(input_file)?;
     let reader = BufReader::new(file);
     let lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
@@ -214,7 +351,7 @@ fn load_samples(input_file: &str, gfa_path: Option<&str>) -> std::io::Result<Vec
             let sample_name = fields[0].to_string();
             let input_file = fields[1];
 
-            let coverage = match process_input_to_coverage(input_file, gfa_path, &sample_name) {
+            let coverage = match process_input_to_coverage(input_file, gfa_data) {
                 Ok(cov) => cov,
                 Err(e) => {
                     error!("Error processing {}: {}", input_file, e);
@@ -599,9 +736,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         debug!("Minimum coverage: {}", args.min_coverage);
     }
 
+    // Parse GFA only if needed (i.e., if there are GAF files in the sample table)
+    let gfa_data = if let Some(ref gfa_path) = args.gfa {
+        if has_gaf_files(&args.sample_table)? {
+            info!("Parsing GFA graph from {}", gfa_path);
+            let gfa = gafpack::parse_gfa(gfa_path)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            debug!(
+                "Parsed GFA: {} segments, min_id={}",
+                gfa.0.len(),
+                gfa.1
+            );
+            Some(Arc::new(gfa))
+        } else {
+            warn!("No GAF files detected in sample table, skipping GFA parsing");
+            None
+        }
+    } else {
+        None
+    };
+
     // Load samples
     info!("Loading samples from {}", args.sample_table);
-    let samples = load_samples(&args.sample_table, args.gfa.as_deref())?;
+    let samples = load_samples(&args.sample_table, &gfa_data)?;
     debug!("Loaded {} samples", samples.len());
 
     // Generate and write feature coverage mask if requested
