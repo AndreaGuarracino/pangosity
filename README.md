@@ -3,7 +3,7 @@
 Pangenome-based zygosity matrices from coverage data.
 
 <p align="center">
-  <img src="pangosity.png" alt="Pangosity Logo" width="300"/>
+  <img src="pangosity-logo.png" alt="Pangosity logo" width="300"/>
 </p>
 
 ## Installation
