@@ -17,24 +17,35 @@ cargo build --release
 ## Usage
 
 ```bash
+# With input PACK format (coverage files) - no GFA needed
 pangosity -s samples.txt -g genotypes.tsv
-# or
-pangosity -s samples.txt -d dosages.tsv
-# or
-pangosity -s samples.txt -b dosages.bimbam
-# or combine multiple outputs
-pangosity -s samples.txt -g genotypes.tsv -d dosages.tsv -b dosages.bimbam
+
+# With input GAF format - GFA required
+pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv
+
+# Multiple output formats
+pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv -d dosages.tsv -b dosages.bimbam
+
+# Mixed input formats (automatically detected)
+pangosity -s mixed_samples.txt --gfa graph.gfa -d dosages.tsv
 ```
 
 ### Input
 
+Pangosity supports multiple input formats (uncompressed or gzipped) with automatic detection:
+
+- **PACK** (coverage files) - Direct input, no conversion needed
+- **GAF** (Graph Alignment Format) - Converted to coverage via `gafpack`; it requires the GFA graph file
+
 Sample table file (tab-separated):
 ```
-sample1	sample1.coverage.txt.gz
-sample2	sample2.coverage.txt.gz
+sample1	sample1.pack.gz
+sample2	sample2.gaf.gz
 ```
 
-Coverage files in tall format (supports `.gz`):
+#### PACK format
+
+Coverage files in tall format:
 ```
 ##sample: sample_name
 #coverage
@@ -43,7 +54,9 @@ Coverage files in tall format (supports `.gz`):
 ...
 ```
 
-Example sources: `gafpack --coverage-column` (nodes).
+Example sources:
+- PACK: `gafpack --coverage-column` (nodes)
+- GAF: Any GAF alignment file against the graph
 
 ### Parameters
 
