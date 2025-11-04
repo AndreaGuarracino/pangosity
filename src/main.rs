@@ -336,9 +336,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Validate GFA is provided if GAF files are present
+    let has_gaf = has_gaf_files(&args.sample_table)?;
+    if has_gaf && args.gfa.is_none() {
+        error!("GAF files detected in sample table but no GFA graph provided. Use --gfa to specify the graph file.");
+        std::process::exit(1);
+    }
+
     // Parse GFA only if needed (i.e., if there are GAF files in the sample table)
     let gfa_data = if let Some(ref gfa_path) = args.gfa {
-        if has_gaf_files(&args.sample_table)? {
+        if has_gaf {
             info!("Parsing GFA graph from {}", gfa_path);
             let gfa = gafpack::parse_gfa(gfa_path)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
