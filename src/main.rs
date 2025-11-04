@@ -240,73 +240,183 @@ impl Zygosity {
     }
 }
 
-/// Compute mean coverage (only non-zero values)
-fn compute_mean(values: &[f64]) -> f64 {
-    let non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
-    if non_zero.is_empty() {
-        return 0.0;
-    }
-    non_zero.iter().sum::<f64>() / non_zero.len() as f64
-}
 
-/// Compute median coverage (only non-zero values)
-fn compute_median(values: &[f64]) -> f64 {
-    let mut non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
-    if non_zero.is_empty() {
-        return 0.0;
-    }
-    non_zero.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let mid = non_zero.len() / 2;
-    if non_zero.len().is_multiple_of(2) {
-        (non_zero[mid - 1] + non_zero[mid]) / 2.0
-    } else {
-        non_zero[mid]
-    }
-}
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
 
-/// Call zygosity for a single feature based on coverage and ploidy
-///
-/// For ploidy 1:
-/// - coverage < haploid_threshold * ref_coverage = 0
-/// - coverage >= haploid_threshold * ref_coverage = 1
-///
-/// For ploidy 2:
-/// - coverage < het_lower * ref_coverage = 0/0
-/// - het_lower * ref_coverage <= coverage < het_upper * ref_coverage = 0/1
-/// - coverage >= het_upper * ref_coverage = 1/1
-fn call_zygosity(
-    coverage: f64,
-    ref_coverage: f64,
-    ploidy: u8,
-    min_cov: f64,
-    het_lower: f64,
-    het_upper: f64,
-    haploid_threshold: f64,
-) -> Zygosity {
-    if coverage < min_cov {
-        return Zygosity::Missing;
+    // Set log level based on verbosity
+    env_logger::Builder::new()
+        .filter_level(match args.verbose {
+            0 => log::LevelFilter::Error,
+            1 => log::LevelFilter::Info,
+            _ => log::LevelFilter::Debug,
+        })
+        .init();
+
+    // Configure rayon thread pool
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(args.threads)
+        .build_global()
+        .unwrap();
+
+    // Validate at least one output is specified
+    if args.genotype_matrix.is_none()
+        && args.dosage_matrix.is_none()
+        && args.dosage_bimbam.is_none()
+    {
+        error!(
+            "At least one output must be specified: --genotype-matrix, --dosage-matrix, or --dosage-bimbam"
+        );
+        std::process::exit(1);
     }
 
-    if ploidy == 1 {
-        if coverage >= haploid_threshold * ref_coverage {
-            Zygosity::HomAlt // Present (1)
+    if args.ploidy != 1 && args.ploidy != 2 {
+        error!("Ploidy must be 1 or 2");
+        std::process::exit(1);
+    }
+
+    if args.norm_method != "mean" && args.norm_method != "median" {
+        error!("Method must be 'mean' or 'median'");
+        std::process::exit(1);
+    }
+
+    // Parse thresholds based on ploidy
+    let (haploid_threshold, het_lower, het_upper) = if let Some(ref t) = args.calling_thresholds {
+        let values: Vec<&str> = t.split(',').collect();
+        if args.ploidy == 1 {
+            if values.len() != 1 {
+                error!(
+                    "Ploidy 1 requires a single threshold value (e.g., --calling-thresholds 0.5)"
+                );
+                std::process::exit(1);
+            }
+            let threshold = values[0].parse::<f64>().unwrap_or_else(|_| {
+                error!("Invalid threshold value: {}", values[0]);
+                std::process::exit(1);
+            });
+            (threshold, 0.25, 0.75) // het values don't matter for ploidy 1
         } else {
-            Zygosity::HomRef // Absent (0)
-        }
-    } else if ploidy == 2 {
-        let threshold_lower = het_lower * ref_coverage;
-        let threshold_upper = het_upper * ref_coverage;
-
-        if coverage < threshold_lower {
-            Zygosity::HomRef // 0/0
-        } else if coverage < threshold_upper {
-            Zygosity::Het // 0/1
-        } else {
-            Zygosity::HomAlt // 1/1
+            if values.len() != 2 {
+                error!(
+                    "Ploidy 2 requires two comma-separated threshold values (e.g., --calling-thresholds 0.25,0.75)"
+                );
+                std::process::exit(1);
+            }
+            let lower = values[0].parse::<f64>().unwrap_or_else(|_| {
+                error!("Invalid lower threshold value: {}", values[0]);
+                std::process::exit(1);
+            });
+            let upper = values[1].parse::<f64>().unwrap_or_else(|_| {
+                error!("Invalid upper threshold value: {}", values[1]);
+                std::process::exit(1);
+            });
+            (0.5, lower, upper) // haploid value doesn't matter for ploidy 2
         }
     } else {
-        panic!("Unsupported ploidy: {}", ploidy);
+        // Default thresholds
+        (0.5, 0.25, 0.75)
+    };
+
+    // Log parameters
+    if args.verbose > 1 {
+        debug!("Input: {}", args.sample_table);
+        if let Some(ref path) = args.genotype_matrix {
+            debug!("Genotype matrix output: {}", path);
+        }
+        if let Some(ref path) = args.dosage_matrix {
+            debug!("Dosage matrix output: {}", path);
+        }
+        debug!("Ploidy: {}", args.ploidy);
+        debug!("Normalization method: {}", args.norm_method);
+        if args.ploidy == 1 {
+            debug!("Calling threshold: {}", haploid_threshold);
+        } else {
+            debug!("Calling thresholds: {}, {}", het_lower, het_upper);
+        }
+        if args.min_coverage > 0.0 {
+            debug!("Minimum coverage: {}", args.min_coverage);
+        }
     }
+
+    // Parse GFA only if needed (i.e., if there are GAF files in the sample table)
+    let gfa_data = if let Some(ref gfa_path) = args.gfa {
+        if has_gaf_files(&args.sample_table)? {
+            info!("Parsing GFA graph from {}", gfa_path);
+            let gfa = gafpack::parse_gfa(gfa_path)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            debug!(
+                "Parsed GFA: {} segments, min_id={}",
+                gfa.0.len(),
+                gfa.1
+            );
+            Some(Arc::new(gfa))
+        } else {
+            warn!("No GAF files detected in sample table, skipping GFA parsing");
+            None
+        }
+    } else {
+        None
+    };
+
+    // Load samples
+    info!("Loading samples from {}", args.sample_table);
+    let samples = load_samples(&args.sample_table, &gfa_data)?;
+    debug!("Loaded {} samples", samples.len());
+
+    // Generate and write feature coverage mask if requested
+    if let Some(ref mask_path) = args.feature_cov_mask {
+        info!("Writing feature coverage mask to {}", mask_path);
+        let mask = compute_feature_filter_mask(&samples);
+        write_feature_filter_mask(&mask, mask_path)?;
+    }
+
+    // Write genotype matrix if requested
+    if let Some(ref genotype_path) = args.genotype_matrix {
+        info!("Writing genotype matrix to {}", genotype_path);
+        write_zygosity_matrix(
+            &samples,
+            genotype_path,
+            args.ploidy,
+            &args.norm_method,
+            args.min_coverage,
+            het_lower,
+            het_upper,
+            haploid_threshold,
+        )?;
+    }
+
+    // Write dosage matrix if requested
+    if let Some(ref dosage_path) = args.dosage_matrix {
+        info!("Writing dosage matrix to {}", dosage_path);
+        write_dosage_matrix(
+            &samples,
+            dosage_path,
+            args.ploidy,
+            &args.norm_method,
+            args.min_coverage,
+            het_lower,
+            het_upper,
+            haploid_threshold,
+        )?;
+    }
+
+    // Write BIMBAM dosage matrix if requested
+    if let Some(ref bimbam_path) = args.dosage_bimbam {
+        info!("Writing dosage BIMBAM to {}", bimbam_path);
+        write_dosage_bimbam(
+            &samples,
+            bimbam_path,
+            args.ploidy,
+            &args.norm_method,
+            args.min_coverage,
+            het_lower,
+            het_upper,
+            haploid_threshold,
+        )?;
+    }
+
+    info!("Done!");
+    Ok(())
 }
 
 /// Check if sample table contains any GAF files using format detection
@@ -439,6 +549,51 @@ fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
     );
 
     mask
+}
+
+/// Call zygosity for a single feature based on coverage and ploidy
+///
+/// For ploidy 1:
+/// - coverage < haploid_threshold * ref_coverage = 0
+/// - coverage >= haploid_threshold * ref_coverage = 1
+///
+/// For ploidy 2:
+/// - coverage < het_lower * ref_coverage = 0/0
+/// - het_lower * ref_coverage <= coverage < het_upper * ref_coverage = 0/1
+/// - coverage >= het_upper * ref_coverage = 1/1
+fn call_zygosity(
+    coverage: f64,
+    ref_coverage: f64,
+    ploidy: u8,
+    min_cov: f64,
+    het_lower: f64,
+    het_upper: f64,
+    haploid_threshold: f64,
+) -> Zygosity {
+    if coverage < min_cov {
+        return Zygosity::Missing;
+    }
+
+    if ploidy == 1 {
+        if coverage >= haploid_threshold * ref_coverage {
+            Zygosity::HomAlt // Present (1)
+        } else {
+            Zygosity::HomRef // Absent (0)
+        }
+    } else if ploidy == 2 {
+        let threshold_lower = het_lower * ref_coverage;
+        let threshold_upper = het_upper * ref_coverage;
+
+        if coverage < threshold_lower {
+            Zygosity::HomRef // 0/0
+        } else if coverage < threshold_upper {
+            Zygosity::Het // 0/1
+        } else {
+            Zygosity::HomAlt // 1/1
+        }
+    } else {
+        panic!("Unsupported ploidy: {}", ploidy);
+    }
 }
 
 /// Write feature filter mask to output file
@@ -642,177 +797,26 @@ fn write_dosage_bimbam(
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-
-    // Set log level based on verbosity
-    env_logger::Builder::new()
-        .filter_level(match args.verbose {
-            0 => log::LevelFilter::Error,
-            1 => log::LevelFilter::Info,
-            _ => log::LevelFilter::Debug,
-        })
-        .init();
-
-    // Configure rayon thread pool
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(args.threads)
-        .build_global()
-        .unwrap();
-
-    // Validate at least one output is specified
-    if args.genotype_matrix.is_none()
-        && args.dosage_matrix.is_none()
-        && args.dosage_bimbam.is_none()
-    {
-        error!(
-            "At least one output must be specified: --genotype-matrix, --dosage-matrix, or --dosage-bimbam"
-        );
-        std::process::exit(1);
+/// Compute mean coverage (only non-zero values)
+fn compute_mean(values: &[f64]) -> f64 {
+    let non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
+    if non_zero.is_empty() {
+        return 0.0;
     }
+    non_zero.iter().sum::<f64>() / non_zero.len() as f64
+}
 
-    if args.ploidy != 1 && args.ploidy != 2 {
-        error!("Ploidy must be 1 or 2");
-        std::process::exit(1);
+/// Compute median coverage (only non-zero values)
+fn compute_median(values: &[f64]) -> f64 {
+    let mut non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
+    if non_zero.is_empty() {
+        return 0.0;
     }
-
-    if args.norm_method != "mean" && args.norm_method != "median" {
-        error!("Method must be 'mean' or 'median'");
-        std::process::exit(1);
-    }
-
-    // Parse thresholds based on ploidy
-    let (haploid_threshold, het_lower, het_upper) = if let Some(ref t) = args.calling_thresholds {
-        let values: Vec<&str> = t.split(',').collect();
-        if args.ploidy == 1 {
-            if values.len() != 1 {
-                error!(
-                    "Ploidy 1 requires a single threshold value (e.g., --calling-thresholds 0.5)"
-                );
-                std::process::exit(1);
-            }
-            let threshold = values[0].parse::<f64>().unwrap_or_else(|_| {
-                error!("Invalid threshold value: {}", values[0]);
-                std::process::exit(1);
-            });
-            (threshold, 0.25, 0.75) // het values don't matter for ploidy 1
-        } else {
-            if values.len() != 2 {
-                error!(
-                    "Ploidy 2 requires two comma-separated threshold values (e.g., --calling-thresholds 0.25,0.75)"
-                );
-                std::process::exit(1);
-            }
-            let lower = values[0].parse::<f64>().unwrap_or_else(|_| {
-                error!("Invalid lower threshold value: {}", values[0]);
-                std::process::exit(1);
-            });
-            let upper = values[1].parse::<f64>().unwrap_or_else(|_| {
-                error!("Invalid upper threshold value: {}", values[1]);
-                std::process::exit(1);
-            });
-            (0.5, lower, upper) // haploid value doesn't matter for ploidy 2
-        }
+    non_zero.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mid = non_zero.len() / 2;
+    if non_zero.len().is_multiple_of(2) {
+        (non_zero[mid - 1] + non_zero[mid]) / 2.0
     } else {
-        // Default thresholds
-        (0.5, 0.25, 0.75)
-    };
-
-    debug!("Input: {}", args.sample_table);
-    if let Some(ref path) = args.genotype_matrix {
-        debug!("Genotype matrix output: {}", path);
+        non_zero[mid]
     }
-    if let Some(ref path) = args.dosage_matrix {
-        debug!("Dosage matrix output: {}", path);
-    }
-    debug!("Ploidy: {}", args.ploidy);
-    debug!("Normalization method: {}", args.norm_method);
-    if args.ploidy == 1 {
-        debug!("Calling threshold: {}", haploid_threshold);
-    } else {
-        debug!("Calling thresholds: {}, {}", het_lower, het_upper);
-    }
-    if args.min_coverage > 0.0 {
-        debug!("Minimum coverage: {}", args.min_coverage);
-    }
-
-    // Parse GFA only if needed (i.e., if there are GAF files in the sample table)
-    let gfa_data = if let Some(ref gfa_path) = args.gfa {
-        if has_gaf_files(&args.sample_table)? {
-            info!("Parsing GFA graph from {}", gfa_path);
-            let gfa = gafpack::parse_gfa(gfa_path)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-            debug!(
-                "Parsed GFA: {} segments, min_id={}",
-                gfa.0.len(),
-                gfa.1
-            );
-            Some(Arc::new(gfa))
-        } else {
-            warn!("No GAF files detected in sample table, skipping GFA parsing");
-            None
-        }
-    } else {
-        None
-    };
-
-    // Load samples
-    info!("Loading samples from {}", args.sample_table);
-    let samples = load_samples(&args.sample_table, &gfa_data)?;
-    debug!("Loaded {} samples", samples.len());
-
-    // Generate and write feature coverage mask if requested
-    if let Some(ref mask_path) = args.feature_cov_mask {
-        info!("Writing feature coverage mask to {}", mask_path);
-        let mask = compute_feature_filter_mask(&samples);
-        write_feature_filter_mask(&mask, mask_path)?;
-    }
-
-    // Write genotype matrix if requested
-    if let Some(ref genotype_path) = args.genotype_matrix {
-        info!("Writing genotype matrix to {}", genotype_path);
-        write_zygosity_matrix(
-            &samples,
-            genotype_path,
-            args.ploidy,
-            &args.norm_method,
-            args.min_coverage,
-            het_lower,
-            het_upper,
-            haploid_threshold,
-        )?;
-    }
-
-    // Write dosage matrix if requested
-    if let Some(ref dosage_path) = args.dosage_matrix {
-        info!("Writing dosage matrix to {}", dosage_path);
-        write_dosage_matrix(
-            &samples,
-            dosage_path,
-            args.ploidy,
-            &args.norm_method,
-            args.min_coverage,
-            het_lower,
-            het_upper,
-            haploid_threshold,
-        )?;
-    }
-
-    // Write BIMBAM dosage matrix if requested
-    if let Some(ref bimbam_path) = args.dosage_bimbam {
-        info!("Writing dosage BIMBAM to {}", bimbam_path);
-        write_dosage_bimbam(
-            &samples,
-            bimbam_path,
-            args.ploidy,
-            &args.norm_method,
-            args.min_coverage,
-            het_lower,
-            het_upper,
-            haploid_threshold,
-        )?;
-    }
-
-    info!("Done!");
-    Ok(())
 }
