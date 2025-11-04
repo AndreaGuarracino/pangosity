@@ -169,6 +169,10 @@ struct Args {
     #[arg(help_heading = "Output", long)]
     feature_cov_mask: Option<String>,
 
+    /// Save computed coverage to directory (for GAF inputs)
+    #[arg(help_heading = "Output", long)]
+    save_coverage: Option<String>,
+
     /// Number of threads for parallel processing
     #[arg(help_heading = "General", short, long, default_value = "4")]
     threads: usize,
@@ -336,12 +340,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Validate GFA is provided if GAF files are present
-    let has_gaf = has_gaf_files(&args.sample_table)?;
+    // Validate sample table and check if GAF files are present
+    let has_gaf = validate_sample_table(&args.sample_table)?;
     if has_gaf {
         warn!("GAF input detected: coverage will be computed on-the-fly (slower than PACK)");
         if args.gfa.is_none() {
             error!("GAF files detected in sample table but no GFA graph provided. Use --gfa to specify the graph file.");
+            std::process::exit(1);
+        }
+    }
+
+    // Create coverage output directory if specified
+    if let Some(ref dir) = args.save_coverage {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            error!("Failed to create coverage directory '{}': {}", dir, e);
             std::process::exit(1);
         }
     }
@@ -368,7 +380,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load samples
     info!("Loading samples from {}", args.sample_table);
-    let samples = load_samples(&args.sample_table, &gfa_data, &args.norm_method)?;
+    let samples = load_samples(
+        &args.sample_table,
+        &gfa_data,
+        &args.norm_method,
+        args.save_coverage.as_deref(),
+    )?;
     debug!("Loaded {} samples", samples.len());
 
     // Generate and write feature coverage mask if requested
@@ -424,20 +441,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Check if sample table contains any GAF files using format detection
-fn has_gaf_files(sample_table: &str) -> std::io::Result<bool> {
+/// Validate sample table format and check if it contains GAF files
+fn validate_sample_table(sample_table: &str) -> std::io::Result<bool> {
     let file = File::open(sample_table)?;
     let reader = BufReader::new(file);
 
     for line in reader.lines() {
         let line = line?;
         let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() >= 2 {
-            let input_path = fields[1];
-            // Use detect_format to properly detect GAF files
-            if let Ok(InputFormat::Gaf) = detect_format(input_path) {
-                return Ok(true);
-            }
+        if fields.len() != 2 {
+            error!("Malformed line in sample table: {}", line);
+            std::process::exit(1);
+        }
+        let input_path = fields[1];
+        // Use detect_format to properly detect GAF files
+        if let Ok(InputFormat::Gaf) = detect_format(input_path) {
+            return Ok(true);
         }
     }
     Ok(false)
@@ -450,6 +469,7 @@ fn load_samples(
     input_file: &str,
     gfa_data: &Option<Arc<(Vec<usize>, usize)>>,
     norm_method: &str,
+    save_coverage_dir: Option<&str>,
 ) -> std::io::Result<Vec<Sample>> {
     let file = File::open(input_file)?;
     let reader = BufReader::new(file);
@@ -457,23 +477,15 @@ fn load_samples(
 
     let samples: Vec<Sample> = lines
         .par_iter()
-        .filter_map(|line| {
+        .map(|line| {
             let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() != 2 {
-                warn!("Skipping malformed line: {}", line);
-                return None;
-            }
-
             let sample_name = fields[0].to_string();
             let input_file = fields[1];
 
-            let coverage = match process_input_to_coverage(input_file, gfa_data) {
-                Ok(cov) => cov,
-                Err(e) => {
-                    error!("Error processing {}: {}", input_file, e);
-                    return None;
-                }
-            };
+            let coverage = process_input_to_coverage(input_file, gfa_data).unwrap_or_else(|e| {
+                error!("Error processing {}: {}", input_file, e);
+                std::process::exit(1);
+            });
 
             let ref_coverage = if norm_method == "mean" {
                 compute_mean(&coverage)
@@ -491,11 +503,19 @@ fn load_samples(
                 non_zero_count
             );
 
-            Some(Sample {
+            if let Some(dir) = save_coverage_dir {
+                let output_path = format!("{}/{}.pack", dir, sample_name);
+                let content = gafpack::format_coverage_column(&sample_name, &coverage);
+                if let Err(e) = std::fs::write(&output_path, content) {
+                    warn!("Failed to save coverage for {}: {}", sample_name, e);
+                }
+            }
+
+            Sample {
                 name: sample_name,
                 coverage,
                 ref_coverage,
-            })
+            }
         })
         .collect();
 
