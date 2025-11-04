@@ -1,6 +1,6 @@
 # Pangosity
 
-Pangenome-based zygosity matrices from coverage data.
+Pangenome-based zygosity matrices.
 
 <p align="center">
   <img src="pangosity-logo.png" alt="Pangosity logo" width="300"/>
