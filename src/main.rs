@@ -129,7 +129,7 @@ struct Args {
     sample_table: String,
 
     /// GFA pangenome graph file (required for GAF inputs)
-    #[arg(help_heading = "Input", short, long)]
+    #[arg(help_heading = "Input", long)]
     gfa: Option<String>,
 
     /// Ploidy level (1 or 2)
