@@ -23,6 +23,9 @@ pangosity -s samples.txt -g genotypes.tsv
 # With input GAF format - GFA required
 pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv
 
+# Save coverage (for GAF inputs)
+pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv --save-coverage coverage_dir/
+
 # Multiple output formats
 pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv -d dosages.tsv -b dosages.bimbam
 
@@ -70,6 +73,7 @@ Coverage files in tall format:
 - `-d, --dosage-matrix`: Output dosage matrix file (0,1 if ploidy=1; 0,1,2 if ploidy=2)
 - `-b, --dosage-bimbam`: Output dosage matrix file in BIMBAM format (feature,ref,alt,dosages...)
 - `--feature-cov-mask`: Output feature coverage mask file (1=keep, 0=filter outliers)
+- `--save-coverage`: Save computed coverage to directory as compressed PACK files (for GAF inputs)
 
 **General:**
 - `-t, --threads`: Number of threads for parallel processing [default: 4]
