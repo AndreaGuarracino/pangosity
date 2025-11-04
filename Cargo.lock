@@ -244,6 +244,7 @@ dependencies = [
 [[package]]
 name = "gafpack"
 version = "0.1.2"
+source = "git+https://github.com/pangenome/gafpack?rev=d4fc68f094ab511f70bc442d4b251a5fcf4fe77e#d4fc68f094ab511f70bc442d4b251a5fcf4fe77e"
 dependencies = [
  "clap",
  "flate2",

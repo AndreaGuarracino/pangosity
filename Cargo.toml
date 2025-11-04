@@ -11,4 +11,4 @@ niffler = "3.0.0"
 log = "0.4.28"
 env_logger = "0.11.8"
 rayon = "1.11.0"
-gafpack = { path = "/home/guarracino/git/gafpack" }
+gafpack = { git = "https://github.com/pangenome/gafpack", rev = "d4fc68f094ab511f70bc442d4b251a5fcf4fe77e" }
