@@ -776,11 +776,15 @@ fn write_dosage_bimbam(
 
 /// Compute mean coverage (only non-zero values)
 fn compute_mean(values: &[f64]) -> f64 {
-    let non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
-    if non_zero.is_empty() {
-        return 0.0;
+    let (sum, count) = values
+        .iter()
+        .filter(|&&x| x > 0.0)
+        .fold((0.0, 0), |(sum, count), &x| (sum + x, count + 1));
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
     }
-    non_zero.iter().sum::<f64>() / non_zero.len() as f64
 }
 
 /// Compute median coverage (only non-zero values)
