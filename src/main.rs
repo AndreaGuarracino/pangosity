@@ -338,9 +338,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Validate GFA is provided if GAF files are present
     let has_gaf = has_gaf_files(&args.sample_table)?;
-    if has_gaf && args.gfa.is_none() {
-        error!("GAF files detected in sample table but no GFA graph provided. Use --gfa to specify the graph file.");
-        std::process::exit(1);
+    if has_gaf {
+        warn!("GAF input detected: coverage will be computed on-the-fly (slower than PACK)");
+        if args.gfa.is_none() {
+            error!("GAF files detected in sample table but no GFA graph provided. Use --gfa to specify the graph file.");
+            std::process::exit(1);
+        }
     }
 
     // Parse GFA only if needed (i.e., if there are GAF files in the sample table)
