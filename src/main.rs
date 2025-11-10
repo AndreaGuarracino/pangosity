@@ -153,10 +153,6 @@ struct Args {
     #[arg(short, help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
-    /// Minimum coverage threshold (below: missing)
-    #[arg(help_heading = "Calling parameters", long, default_value = "0.0")]
-    min_coverage: f64,
-
     /// Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
     #[arg(help_heading = "Output", short, long)]
     genotype_matrix: Option<String>,
@@ -386,9 +382,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             _ => {}
         }
-        if args.min_coverage > 0.0 {
-            debug!("Minimum coverage: {}", args.min_coverage);
-        }
     }
 
     // Validate sample table and check if GAF files are present
@@ -453,7 +446,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &samples,
             genotype_path,
             args.ploidy,
-            args.min_coverage,
             &calling_thresholds,
         )?;
     }
@@ -465,7 +457,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &samples,
             dosage_path,
             args.ploidy,
-            args.min_coverage,
             &calling_thresholds,
         )?;
     }
@@ -477,7 +468,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &samples,
             bimbam_path,
             args.ploidy,
-            args.min_coverage,
             &calling_thresholds,
         )?;
     }
@@ -655,13 +645,8 @@ fn call_zygosity(
     coverage: f64,
     ref_coverage: f64,
     ploidy: u8,
-    min_cov: f64,
     thresholds: &[f64],
 ) -> Zygosity {
-    if coverage < min_cov {
-        return Zygosity::Missing;
-    }
-
     let rel_cov = coverage / ref_coverage;
 
     match (ploidy, thresholds.len()) {
@@ -729,7 +714,6 @@ fn write_zygosity_matrix(
     samples: &[Sample],
     output_path: &str,
     ploidy: u8,
-    min_coverage: f64,
     thresholds: &[f64],
 ) -> std::io::Result<()> {
     if samples.is_empty() {
@@ -775,7 +759,6 @@ fn write_zygosity_matrix(
                 coverage,
                 sample.ref_coverage,
                 ploidy,
-                min_coverage,
                 thresholds,
             );
 
@@ -798,7 +781,6 @@ fn write_dosage_matrix(
     samples: &[Sample],
     output_path: &str,
     ploidy: u8,
-    min_coverage: f64,
     thresholds: &[f64],
 ) -> std::io::Result<()> {
     if samples.is_empty() {
@@ -828,7 +810,6 @@ fn write_dosage_matrix(
                 coverage,
                 sample.ref_coverage,
                 ploidy,
-                min_coverage,
                 thresholds,
             );
 
@@ -847,7 +828,6 @@ fn write_dosage_bimbam(
     samples: &[Sample],
     output_path: &str,
     ploidy: u8,
-    min_coverage: f64,
     thresholds: &[f64],
 ) -> std::io::Result<()> {
     if samples.is_empty() {
@@ -871,7 +851,6 @@ fn write_dosage_bimbam(
                 coverage,
                 sample.ref_coverage,
                 ploidy,
-                min_coverage,
                 thresholds,
             );
 
