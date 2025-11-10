@@ -65,7 +65,7 @@ Coverage files in tall format:
 **Calling parameters:**
 - `-p, --ploidy`: Ploidy level (1 or 2) [default: 2]
 - `-m, --norm-method`: Normalization method (mean or median) [default: median]
-- `-c, --calling-thresholds`: Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
+- `-c, --calling-thresholds`: Genotype calling thresholds [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
 - `--min-coverage`: Minimum coverage threshold (below: missing) [default: 0.0]
 
 **Output:**
@@ -84,6 +84,7 @@ Coverage files in tall format:
 ### Output
 
 **Genotype matrix** (tab-separated):
+
 ```
 #feature   sample1     sample2     sample3
 1          0/0         0/1         1/1
@@ -94,6 +95,7 @@ Coverage files in tall format:
 - **Diploid** (ploidy=2): `0/0` (absent), `0/1` (heterozygous), `1/1` (present), `./.` (missing)
 
 **Dosage matrix** (tab-separated):
+
 ```
 #feature   sample1     sample2     sample3
 1          0           1           2
@@ -104,6 +106,7 @@ Coverage files in tall format:
 - **Diploid** (ploidy=2): `0` (0/0), `1` (0/1), `2` (1/1), `NA` (missing)
 
 **BIMBAM dosage matrix** (comma-separated):
+
 ```
 N1,A,T,0,1,2
 N2,A,T,1,2,0
@@ -111,17 +114,47 @@ N3,A,T,0,0,1
 ```
 
 Format: `feature_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
-- No header row
+
 - Features as rows, samples as columns
 - Alleles: A (reference), T (alternate)
 - Missing dosages written as `NA`
 
 ## Genotype calling
 
-Genotypes are called using coverage thresholds relative to each sample's mean or median coverage (non-zero values only).
+Genotypes are called using coverage thresholds relative to each sample's reference coverage (`ref`). Thresholds must be positive and strictly ascending. `ref` is defined as each sample's mean or median coverage across all features (computed using non-zero values only).
 
-- **Haploid (ploidy 1)**: `coverage < t×ref → 0`, `coverage ≥ t×ref → 1` (default `t=0.5`)
-- **Diploid (ploidy 2)**: `coverage < L×ref → 0/0`, `L×ref ≤ coverage < U×ref → 0/1`, `coverage ≥ U×ref → 1/1` (default `L=0.25, U=0.75`)
+### Simple mode (default)
+
+**Ploidy 1**: specify a `threshold` (default `threshold=0.5`):
+- `coverage < threshold×ref → 0`
+- `coverage ≥ threshold×ref → 1`
+
+**Ploidy 2**: specify `low` and `high` thresholds (default `low=0.25, high=0.75`):
+- `coverage < low×ref → 0/0`
+- `low×ref ≤ coverage < high×ref → 0/1`
+- `coverage ≥ high×ref → 1/1`
+
+### No-call mode
+
+To mark uncertain genotypes as missing:
+
+**Ploidy 1**: specify 2 values to create a no-call zone:
+```bash
+pangosity -s samples.txt -g genotypes.tsv -p 1 -c 0.4,0.6
+```
+- `coverage < 0.4×ref → 0`
+- `0.4×ref ≤ coverage < 0.6×ref → .` (no-call)
+- `coverage ≥ 0.6×ref → 1`
+
+**Ploidy 2**: specify 4 values to create no-call zones:
+```bash
+pangosity -s samples.txt -g genotypes.tsv -p 2 -c 0.15,0.35,0.65,0.85
+```
+- `coverage < 0.15×ref → 0/0`
+- `0.15×ref ≤ coverage < 0.35×ref → ./.` (no-call)
+- `0.35×ref ≤ coverage < 0.65×ref → 0/1`
+- `0.65×ref ≤ coverage < 0.85×ref → ./.` (no-call)
+- `coverage ≥ 0.85×ref → 1/1`
 
 ## Feature coverage filtering
 

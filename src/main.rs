@@ -136,10 +136,6 @@ struct Args {
     #[arg(help_heading = "Input", long)]
     gfa: Option<String>,
 
-    /// Ploidy level (1 or 2)
-    #[arg(help_heading = "Calling parameters", short, long, default_value = "2")]
-    ploidy: u8,
-
     /// Normalization method (mean or median)
     #[arg(
         help_heading = "Calling parameters",
@@ -149,7 +145,11 @@ struct Args {
     )]
     norm_method: String,
 
-    /// Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
+    /// Ploidy level (1 or 2)
+    #[arg(help_heading = "Calling parameters", short, long, default_value = "2")]
+    ploidy: u8,
+
+    /// Genotype calling thresholds [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
     #[arg(short, help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
@@ -287,41 +287,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Parse thresholds based on ploidy
-    let (haploid_threshold, het_lower, het_upper) = if let Some(ref t) = args.calling_thresholds {
+    let calling_thresholds: Vec<f64> = if let Some(ref t) = args.calling_thresholds {
         let values: Vec<&str> = t.split(',').collect();
-        if args.ploidy == 1 {
-            if values.len() != 1 {
+
+        // Validate threshold count based on ploidy
+        let valid_count = match (args.ploidy, values.len()) {
+            (1, 1) => true,  // Simple mode: single threshold
+            (1, 2) => true,  // No-call mode: lower,upper
+            (2, 2) => true,  // Simple mode: het_lower,het_upper
+            (2, 4) => true,  // No-call mode: t1,t2,t3,t4
+            (1, n) => {
                 error!(
-                    "Ploidy 1 requires a single threshold value (e.g., --calling-thresholds 0.5)"
+                    "Ploidy 1 requires 1 threshold (simple) or 2 thresholds (with no-calls), got {}",
+                    n
                 );
-                std::process::exit(1);
+                false
             }
-            let threshold = values[0].parse::<f64>().unwrap_or_else(|_| {
-                error!("Invalid threshold value: {}", values[0]);
-                std::process::exit(1);
-            });
-            (threshold, 0.25, 0.75) // het values don't matter for ploidy 1
-        } else {
-            if values.len() != 2 {
+            (2, n) => {
                 error!(
-                    "Ploidy 2 requires two comma-separated threshold values (e.g., --calling-thresholds 0.25,0.75)"
+                    "Ploidy 2 requires 2 thresholds (simple) or 4 thresholds (with no-calls), got {}",
+                    n
                 );
-                std::process::exit(1);
+                false
             }
-            let lower = values[0].parse::<f64>().unwrap_or_else(|_| {
-                error!("Invalid lower threshold value: {}", values[0]);
-                std::process::exit(1);
-            });
-            let upper = values[1].parse::<f64>().unwrap_or_else(|_| {
-                error!("Invalid upper threshold value: {}", values[1]);
-                std::process::exit(1);
-            });
-            (0.5, lower, upper) // haploid value doesn't matter for ploidy 2
+            _ => false,
+        };
+
+        if !valid_count {
+            std::process::exit(1);
         }
+
+        // Parse threshold values
+        values
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                v.parse::<f64>().unwrap_or_else(|_| {
+                    error!("Invalid threshold value at position {}: {}", i + 1, v);
+                    std::process::exit(1);
+                })
+            })
+            .collect()
     } else {
         // Default thresholds
-        (0.5, 0.25, 0.75)
+        if args.ploidy == 1 {
+            vec![0.5]
+        } else {
+            vec![0.25, 0.75]
+        }
     };
+
+    // Validate thresholds are positive and strictly ascending
+    if calling_thresholds[0] <= 0.0 {
+        error!("Thresholds must be positive, got {}", calling_thresholds[0]);
+        std::process::exit(1);
+    }
+    for i in 1..calling_thresholds.len() {
+        if calling_thresholds[i] <= calling_thresholds[i - 1] {
+            error!(
+                "Thresholds must be strictly ascending: {} ≤ {}",
+                calling_thresholds[i - 1], calling_thresholds[i]
+            );
+            std::process::exit(1);
+        }
+    }
 
     // Log parameters
     if args.verbose > 1 {
@@ -334,10 +363,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         debug!("Ploidy: {}", args.ploidy);
         debug!("Normalization method: {}", args.norm_method);
-        if args.ploidy == 1 {
-            debug!("Calling threshold: {}", haploid_threshold);
-        } else {
-            debug!("Calling thresholds: {}, {}", het_lower, het_upper);
+        match (args.ploidy, calling_thresholds.len()) {
+            (1, 1) => debug!("Calling threshold: {}", calling_thresholds[0]),
+            (1, 2) => debug!(
+                "Calling thresholds with no-calls: <{} → 0, [{},{}] → missing, ≥{} → 1",
+                calling_thresholds[0],
+                calling_thresholds[0],
+                calling_thresholds[1],
+                calling_thresholds[1]
+            ),
+            (2, 2) => debug!(
+                "Calling thresholds: <{} → 0/0, [{},{}) → 0/1, ≥{} → 1/1",
+                calling_thresholds[0], calling_thresholds[0], calling_thresholds[1], calling_thresholds[1]
+            ),
+            (2, 4) => debug!(
+                "Calling thresholds with no-calls: <{} → 0/0, [{},{}) → missing, [{},{}) → 0/1, [{},{}) → missing, ≥{} → 1/1",
+                calling_thresholds[0],
+                calling_thresholds[0], calling_thresholds[1],
+                calling_thresholds[1], calling_thresholds[2],
+                calling_thresholds[2], calling_thresholds[3],
+                calling_thresholds[3]
+            ),
+            _ => {}
         }
         if args.min_coverage > 0.0 {
             debug!("Minimum coverage: {}", args.min_coverage);
@@ -407,9 +454,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             genotype_path,
             args.ploidy,
             args.min_coverage,
-            het_lower,
-            het_upper,
-            haploid_threshold,
+            &calling_thresholds,
         )?;
     }
 
@@ -421,9 +466,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dosage_path,
             args.ploidy,
             args.min_coverage,
-            het_lower,
-            het_upper,
-            haploid_threshold,
+            &calling_thresholds,
         )?;
     }
 
@@ -435,9 +478,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             bimbam_path,
             args.ploidy,
             args.min_coverage,
-            het_lower,
-            het_upper,
-            haploid_threshold,
+            &calling_thresholds,
         )?;
     }
 
@@ -588,46 +629,89 @@ fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
 
 /// Call zygosity for a single feature based on coverage and ploidy
 ///
-/// For ploidy 1:
-/// - coverage < haploid_threshold * ref_coverage = 0
-/// - coverage >= haploid_threshold * ref_coverage = 1
+/// For ploidy 1 with 1 threshold [t]:
+/// - rel_cov < t = 0
+/// - rel_cov >= t = 1
 ///
-/// For ploidy 2:
-/// - coverage < het_lower * ref_coverage = 0/0
-/// - het_lower * ref_coverage <= coverage < het_upper * ref_coverage = 0/1
-/// - coverage >= het_upper * ref_coverage = 1/1
+/// For ploidy 1 with 2 thresholds [lower, upper]:
+/// - rel_cov < lower = 0
+/// - lower <= rel_cov < upper = missing (no-call)
+/// - rel_cov >= upper = 1
+///
+/// For ploidy 2 with 2 thresholds [het_lower, het_upper]:
+/// - rel_cov < het_lower = 0/0
+/// - het_lower <= rel_cov < het_upper = 0/1
+/// - rel_cov >= het_upper = 1/1
+///
+/// For ploidy 2 with 4 thresholds [t1, t2, t3, t4]:
+/// - rel_cov < t1 = 0/0
+/// - t1 <= rel_cov < t2 = missing (no-call)
+/// - t2 <= rel_cov < t3 = 0/1
+/// - t3 <= rel_cov < t4 = missing (no-call)
+/// - rel_cov >= t4 = 1/1
+///
+/// where rel_cov = coverage / ref_coverage
 fn call_zygosity(
     coverage: f64,
     ref_coverage: f64,
     ploidy: u8,
     min_cov: f64,
-    het_lower: f64,
-    het_upper: f64,
-    haploid_threshold: f64,
+    thresholds: &[f64],
 ) -> Zygosity {
     if coverage < min_cov {
         return Zygosity::Missing;
     }
 
-    if ploidy == 1 {
-        if coverage >= haploid_threshold * ref_coverage {
-            Zygosity::HomAlt // Present (1)
-        } else {
-            Zygosity::HomRef // Absent (0)
-        }
-    } else if ploidy == 2 {
-        let threshold_lower = het_lower * ref_coverage;
-        let threshold_upper = het_upper * ref_coverage;
+    let rel_cov = coverage / ref_coverage;
 
-        if coverage < threshold_lower {
-            Zygosity::HomRef // 0/0
-        } else if coverage < threshold_upper {
-            Zygosity::Het // 0/1
-        } else {
-            Zygosity::HomAlt // 1/1
+    match (ploidy, thresholds.len()) {
+        // Ploidy 1, simple mode: single threshold
+        (1, 1) => {
+            if rel_cov >= thresholds[0] {
+                Zygosity::HomAlt // 1
+            } else {
+                Zygosity::HomRef // 0
+            }
         }
-    } else {
-        panic!("Unsupported ploidy: {}", ploidy);
+        // Ploidy 1, no-call mode: lower and upper thresholds
+        (1, 2) => {
+            if rel_cov < thresholds[0] {
+                Zygosity::HomRef // 0
+            } else if rel_cov < thresholds[1] {
+                Zygosity::Missing // uncertain, no-call
+            } else {
+                Zygosity::HomAlt // 1
+            }
+        }
+        // Ploidy 2, simple mode: het_lower and het_upper
+        (2, 2) => {
+            if rel_cov < thresholds[0] {
+                Zygosity::HomRef // 0/0
+            } else if rel_cov < thresholds[1] {
+                Zygosity::Het // 0/1
+            } else {
+                Zygosity::HomAlt // 1/1
+            }
+        }
+        // Ploidy 2, no-call mode: 4 boundaries
+        (2, 4) => {
+            if rel_cov < thresholds[0] {
+                Zygosity::HomRef // 0/0
+            } else if rel_cov < thresholds[1] {
+                Zygosity::Missing // uncertain between 0/0 and 0/1
+            } else if rel_cov < thresholds[2] {
+                Zygosity::Het // 0/1
+            } else if rel_cov < thresholds[3] {
+                Zygosity::Missing // uncertain between 0/1 and 1/1
+            } else {
+                Zygosity::HomAlt // 1/1
+            }
+        }
+        _ => panic!(
+            "Invalid combination: ploidy={}, threshold_count={}",
+            ploidy,
+            thresholds.len()
+        ),
     }
 }
 
@@ -646,9 +730,7 @@ fn write_zygosity_matrix(
     output_path: &str,
     ploidy: u8,
     min_coverage: f64,
-    het_lower: f64,
-    het_upper: f64,
-    haploid_threshold: f64,
+    thresholds: &[f64],
 ) -> std::io::Result<()> {
     if samples.is_empty() {
         return Err(std::io::Error::new(
@@ -694,9 +776,7 @@ fn write_zygosity_matrix(
                 sample.ref_coverage,
                 ploidy,
                 min_coverage,
-                het_lower,
-                het_upper,
-                haploid_threshold,
+                thresholds,
             );
 
             let genotype = if ploidy == 1 {
@@ -719,9 +799,7 @@ fn write_dosage_matrix(
     output_path: &str,
     ploidy: u8,
     min_coverage: f64,
-    het_lower: f64,
-    het_upper: f64,
-    haploid_threshold: f64,
+    thresholds: &[f64],
 ) -> std::io::Result<()> {
     if samples.is_empty() {
         return Err(std::io::Error::new(
@@ -751,9 +829,7 @@ fn write_dosage_matrix(
                 sample.ref_coverage,
                 ploidy,
                 min_coverage,
-                het_lower,
-                het_upper,
-                haploid_threshold,
+                thresholds,
             );
 
             write!(file, "\t{}", zygosity.to_dosage(ploidy))?;
@@ -772,9 +848,7 @@ fn write_dosage_bimbam(
     output_path: &str,
     ploidy: u8,
     min_coverage: f64,
-    het_lower: f64,
-    het_upper: f64,
-    haploid_threshold: f64,
+    thresholds: &[f64],
 ) -> std::io::Result<()> {
     if samples.is_empty() {
         return Err(std::io::Error::new(
@@ -798,9 +872,7 @@ fn write_dosage_bimbam(
                 sample.ref_coverage,
                 ploidy,
                 min_coverage,
-                het_lower,
-                het_upper,
-                haploid_threshold,
+                thresholds,
             );
 
             write!(file, ",{}", zygosity.to_dosage(ploidy))?;
