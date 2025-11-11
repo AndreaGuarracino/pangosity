@@ -153,6 +153,10 @@ struct Args {
     #[arg(short, help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
+    /// Minimum coverage threshold for including features in normalization calculations
+    #[arg(help_heading = "Calling parameters", long, default_value = "0.0")]
+    min_coverage: f64,
+
     /// Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
     #[arg(help_heading = "Output", short, long)]
     genotype_matrix: Option<String>,
@@ -282,6 +286,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
+    if args.min_coverage < 0.0 {
+        error!("Minimum coverage threshold must be non-negative");
+        std::process::exit(1);
+    }
+
     // Parse thresholds based on ploidy
     let calling_thresholds: Vec<f64> = if let Some(ref t) = args.calling_thresholds {
         let values: Vec<&str> = t.split(',').collect();
@@ -359,6 +368,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         debug!("Ploidy: {}", args.ploidy);
         debug!("Normalization method: {}", args.norm_method);
+        debug!("Minimum coverage threshold: {}", args.min_coverage);
         match (args.ploidy, calling_thresholds.len()) {
             (1, 1) => debug!("Calling threshold: {}", calling_thresholds[0]),
             (1, 2) => debug!(
@@ -428,6 +438,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args.sample_table,
         &gfa_data,
         &args.norm_method,
+        args.min_coverage,
         args.save_coverage.as_deref(),
     )?;
     debug!("Loaded {} samples", samples.len());
@@ -504,6 +515,7 @@ fn load_samples(
     input_file: &str,
     gfa_data: &Option<Arc<(Vec<usize>, usize)>>,
     norm_method: &str,
+    min_cov_threshold: f64,
     save_coverage_dir: Option<&str>,
 ) -> std::io::Result<Vec<Sample>> {
     let file = File::open(input_file)?;
@@ -523,19 +535,19 @@ fn load_samples(
             });
 
             let ref_coverage = if norm_method == "mean" {
-                compute_mean(&coverage)
+                compute_mean(&coverage, min_cov_threshold)
             } else {
-                compute_median(&coverage)
+                compute_median(&coverage, min_cov_threshold)
             };
-            let non_zero_count = coverage.iter().filter(|&&x| x > 0.0).count();
 
             debug!(
-                "Loaded sample {} ({} features, {}={:.2} coverage on {} non-zero features)",
+                "Loaded sample {} ({} features, {}={:.2} coverage on {} features > {})",
                 sample_name,
                 coverage.len(),
                 norm_method,
                 ref_coverage,
-                non_zero_count
+                coverage.iter().filter(|&&x| x > min_cov_threshold).count(),
+                min_cov_threshold
             );
 
             if let Some(dir) = save_coverage_dir {
@@ -862,26 +874,26 @@ fn write_dosage_bimbam(
     Ok(())
 }
 
-/// Compute mean coverage (only non-zero values)
-fn compute_mean(values: &[f64]) -> f64 {
+/// Compute mean coverage (only values above threshold)
+fn compute_mean(values: &[f64], threshold: f64) -> f64 {
     let (sum, count) = values
         .iter()
-        .filter(|&&x| x > 0.0)
+        .filter(|&&x| x > threshold)
         .fold((0.0, 0), |(sum, count), &x| (sum + x, count + 1));
     if count == 0 { 0.0 } else { sum / count as f64 }
 }
 
-/// Compute median coverage (only non-zero values)
-fn compute_median(values: &[f64]) -> f64 {
-    let mut non_zero: Vec<f64> = values.iter().filter(|&&x| x > 0.0).copied().collect();
-    if non_zero.is_empty() {
+/// Compute median coverage (only values above threshold)
+fn compute_median(values: &[f64], threshold: f64) -> f64 {
+    let mut filtered: Vec<f64> = values.iter().filter(|&&x| x > threshold).copied().collect();
+    if filtered.is_empty() {
         return 0.0;
     }
-    non_zero.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let mid = non_zero.len() / 2;
-    if non_zero.len().is_multiple_of(2) {
-        (non_zero[mid - 1] + non_zero[mid]) / 2.0
+    filtered.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mid = filtered.len() / 2;
+    if filtered.len().is_multiple_of(2) {
+        (filtered[mid - 1] + filtered[mid]) / 2.0
     } else {
-        non_zero[mid]
+        filtered[mid]
     }
 }

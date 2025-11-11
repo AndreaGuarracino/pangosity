@@ -66,6 +66,7 @@ Coverage files in tall format:
 - `-p, --ploidy`: Ploidy level (1 or 2) [default: 2]
 - `-m, --norm-method`: Normalization method (mean or median) [default: median]
 - `-c, --calling-thresholds`: Genotype calling thresholds [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
+- `--min-coverage`: Minimum coverage for including features in normalization calculations [default: 0.0]
 
 **Output:**
 - `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
@@ -120,7 +121,7 @@ Format: `feature_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
 
 ## Genotype calling
 
-Genotypes are called using coverage thresholds relative to each sample's reference coverage (`ref`). Thresholds must be positive and strictly ascending. `ref` is defined as each sample's mean or median coverage across all features (computed using non-zero values only).
+Genotypes are called using coverage thresholds relative to each sample's reference coverage (`ref`). Thresholds must be positive and strictly ascending. `ref` is defined as each sample's mean or median coverage across features with coverage above `--min-coverage` (default: 0.0).
 
 ### Simple mode (default)
 
