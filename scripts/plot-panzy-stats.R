@@ -48,13 +48,10 @@ coverage_list <- lapply(1:nrow(samples), function(i) {
     # Pack format: ##sample: name\n#coverage\nvalue1\nvalue2\n...
     cat("    Detected pack format\n")
     
-    # Optionally extract sample name from ##sample: line
-    # sample_name_from_file <- sub("^##sample:\\s*", "", lines[1])
-    # cat("    Sample from file:", sample_name_from_file, "\n")
-    
     # Filter out header lines (starting with #) and empty lines
     data_lines <- lines[!grepl("^#", lines) & lines != ""]
-    tibble(sample = samples$sample[i], node = 0:(length(data_lines)-1), coverage = as.numeric(data_lines))
+    # Changed from 0:(length(data_lines)-1) to 1:length(data_lines)
+    tibble(sample = samples$sample[i], node = 1:length(data_lines), coverage = as.numeric(data_lines))
     
   } else if (length(lines) > 0 && grepl("^#sample\\t", lines[1])) {
     # Row format: #sample\tnode.1\tnode.2\t...
@@ -62,13 +59,15 @@ coverage_list <- lapply(1:nrow(samples), function(i) {
     cov_data <- read_tsv(samples$coverage_file[i], comment = "", show_col_types = FALSE)
     sample_name <- cov_data[[1]][1]
     cov_values <- as.numeric(cov_data[1, -1])
-    tibble(sample = samples$sample[i], node = 0:(length(cov_values)-1), coverage = cov_values)
+    # Changed from 0:(length(cov_values)-1) to 1:length(cov_values)
+    tibble(sample = samples$sample[i], node = 1:length(cov_values), coverage = cov_values)
     
   } else {
     # Column format: one value per line (with optional # comments)
     cat("    Detected column format\n")
     data_lines <- lines[!grepl("^#", lines) & lines != ""]
-    tibble(sample = samples$sample[i], node = 0:(length(data_lines)-1), coverage = as.numeric(data_lines))
+    # Changed from 0:(length(data_lines)-1) to 1:length(data_lines)
+    tibble(sample = samples$sample[i], node = 1:length(data_lines), coverage = as.numeric(data_lines))
   }
 })
 coverage <- bind_rows(coverage_list)
@@ -90,7 +89,7 @@ mask_lines <- mask_lines[!grepl("^#", mask_lines) & mask_lines != ""]
 mask_values <- as.integer(mask_lines)
 
 panplexity_mask <- tibble(
-  node = 0:(length(mask_values)-1),
+  node = 1:length(mask_values),  # Changed from 0:(length(mask_values)-1)
   masked = mask_values
 ) %>%
   mutate(masked_label = ifelse(masked == 0, "Low-complexity", "Not masked")) %>%
@@ -106,7 +105,7 @@ coverage_mask_lines <- coverage_mask_lines[!grepl("^#", coverage_mask_lines) & c
 coverage_mask_values <- as.integer(coverage_mask_lines)
 
 node_coverage_mask <- tibble(
-  node = 0:(length(coverage_mask_values)-1),
+  node = 1:length(coverage_mask_values),  # Changed from 0:(length(coverage_mask_values)-1)
   coverage_masked = coverage_mask_values
 ) %>%
   mutate(coverage_masked_label = ifelse(coverage_masked == 0, "Masked", "Not masked")) %>%
@@ -340,6 +339,13 @@ if (has_het) {
 }
 
 # Plot 3b: Panplexity mask across nodes (only show low-complexity nodes)
+# Check which categories exist in the data
+panplexity_categories <- panplexity_mask %>% 
+  filter(!is.na(masked)) %>% 
+  pull(masked_label) %>% 
+  unique()
+
+# Build the plot
 p3b <- ggplot(panplexity_mask %>% filter(!is.na(masked))) +
   geom_rect(
     aes(xmin = cum_start, xmax = cum_end, ymin = 0, ymax = 1, fill = masked_label),
@@ -349,7 +355,8 @@ p3b <- ggplot(panplexity_mask %>% filter(!is.na(masked))) +
   scale_fill_manual(
     values = c("Low-complexity" = "#d73027", "Not masked" = "transparent"),
     name = "Panplexity mask",
-    guide = guide_legend(override.aes = list(fill = c("#d73027", "white"), color = c("black", "black")))
+    breaks = c("Low-complexity", "Not masked"),
+    drop = FALSE
   ) +
   facet_wrap(~"Pangenome", ncol = 1, strip.position = "right") +
   labs(
@@ -370,7 +377,24 @@ p3b <- ggplot(panplexity_mask %>% filter(!is.na(masked))) +
     plot.subtitle = element_text(hjust = 0.5)
   )
 
+# Override legend aesthetics only if needed (to show transparent as white)
+if (length(panplexity_categories) > 1) {
+  p3b <- p3b + guides(fill = guide_legend(
+    override.aes = list(
+      fill = c("Low-complexity" = "#d73027", "Not masked" = "white"),
+      color = c("Low-complexity" = "black", "Not masked" = "black")
+    )
+  ))
+}
+
 # Plot 3c: Node coverage mask across nodes (only show masked nodes)
+# Check which categories exist in the data
+coverage_mask_categories <- node_coverage_mask %>% 
+  filter(!is.na(coverage_masked)) %>% 
+  pull(coverage_masked_label) %>% 
+  unique()
+
+# Build the plot
 p3c <- ggplot(node_coverage_mask %>% filter(!is.na(coverage_masked))) +
   geom_rect(
     aes(xmin = cum_start, xmax = cum_end, ymin = 0, ymax = 1, fill = coverage_masked_label),
@@ -380,7 +404,8 @@ p3c <- ggplot(node_coverage_mask %>% filter(!is.na(coverage_masked))) +
   scale_fill_manual(
     values = c("Masked" = "#e66101", "Not masked" = "transparent"),
     name = "Node coverage mask",
-    guide = guide_legend(override.aes = list(fill = c("#e66101", "white"), color = c("black", "black")))
+    breaks = c("Masked", "Not masked"),
+    drop = FALSE
   ) +
   facet_wrap(~"Node coverage", ncol = 1, strip.position = "right") +
   labs(
@@ -400,6 +425,16 @@ p3c <- ggplot(node_coverage_mask %>% filter(!is.na(coverage_masked))) +
     plot.title = element_text(hjust = 0.5),
     plot.subtitle = element_text(hjust = 0.5)
   )
+
+# Override legend aesthetics only if needed (to show transparent as white)
+if (length(coverage_mask_categories) > 1) {
+  p3c <- p3c + guides(fill = guide_legend(
+    override.aes = list(
+      fill = c("Masked" = "#e66101", "Not masked" = "white"),
+      color = c("Masked" = "black", "Not masked" = "black")
+    )
+  ))
+}
 
 # Plot 4: Coverage across nodes (rectangles scaled by node length)
 # Calculate max coverage per sample and where it occurs
@@ -431,7 +466,7 @@ p4 <- ggplot(coverage %>% filter(!is.na(coverage), coverage > 0)) +
   geom_text(data = max_cov_per_sample, 
             aes(x = Inf, y = max_coverage, label = sprintf("Max: %.1f", max_coverage)),
             hjust = 1.2, vjust = 1.5, size = 3.5, color = "black", fontface = "bold") +
-  facet_wrap(~sample, ncol = 1, scales = "free_y", strip.position = "right") +
+  facet_wrap(~sample, ncol = 1, scales = "fixed", strip.position = "right") +
   scale_y_continuous(trans = "log10") +
   labs(
     title = "Coverage across nodes", 
@@ -644,3 +679,4 @@ max_cov_info <- max_cov_per_sample %>%
 print(max_cov_info, n = Inf)
 
 cat("\nPlots saved to:", output_pdf, "\n")
+
