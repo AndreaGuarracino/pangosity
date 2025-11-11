@@ -149,7 +149,7 @@ struct Args {
     #[arg(help_heading = "Calling parameters", short, long, default_value = "2")]
     ploidy: u8,
 
-    /// Genotype calling thresholds [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
+    /// Genotype calling thresholds [default: 0.5 if ploidy=1; 0.5,1.5 if ploidy=2]
     #[arg(short, help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
@@ -334,11 +334,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
             .collect()
     } else {
-        // Default thresholds
+        // Default thresholds (copy-number model)
         if args.ploidy == 1 {
             vec![0.5]
         } else {
-            vec![0.25, 0.75]
+            vec![0.5, 1.5]
         }
     };
 
@@ -438,6 +438,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args.sample_table,
         &gfa_data,
         &args.norm_method,
+        args.ploidy,
         args.min_coverage,
         args.save_coverage.as_deref(),
     )?;
@@ -515,6 +516,7 @@ fn load_samples(
     input_file: &str,
     gfa_data: &Option<Arc<(Vec<usize>, usize)>>,
     norm_method: &str,
+    ploidy: u8,
     min_cov_threshold: f64,
     save_coverage_dir: Option<&str>,
 ) -> std::io::Result<Vec<Sample>> {
@@ -534,17 +536,22 @@ fn load_samples(
                 std::process::exit(1);
             });
 
-            let ref_coverage = if norm_method == "mean" {
+            // Compute typical coverage across features
+            let typical_coverage = if norm_method == "mean" {
                 compute_mean(&coverage, min_cov_threshold)
             } else {
                 compute_median(&coverage, min_cov_threshold)
             };
 
+            // Convert to haploid coverage estimate
+            let ref_coverage = typical_coverage / ploidy as f64;
+
             debug!(
-                "Loaded sample {} ({} features, {}={:.2} coverage on {} features > {})",
+                "Loaded sample {} ({} features, {}={:.2}, haploid ref={:.2} on {} features > {})",
                 sample_name,
                 coverage.len(),
                 norm_method,
+                typical_coverage,
                 ref_coverage,
                 coverage.iter().filter(|&&x| x > min_cov_threshold).count(),
                 min_cov_threshold
@@ -630,27 +637,32 @@ fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
 }
 
 /// Call zygosity for a single feature based on coverage and ploidy
+/// Uses copy-number model where ref_coverage = haploid coverage
+///
+/// Copy-number interpretation:
+/// - Ploidy 1: 0 copies = 0x ref, 1 copy = 1x ref
+/// - Ploidy 2: 0 copies = 0x ref, 1 copy = 1x ref, 2 copies = 2x ref
 ///
 /// For ploidy 1 with 1 threshold [t]:
-/// - rel_cov < t = 0
-/// - rel_cov >= t = 1
+/// - rel_cov < t → 0 (absent)
+/// - rel_cov >= t → 1 (present)
 ///
 /// For ploidy 1 with 2 thresholds [lower, upper]:
-/// - rel_cov < lower = 0
-/// - lower <= rel_cov < upper = missing (no-call)
-/// - rel_cov >= upper = 1
+/// - rel_cov < lower → 0
+/// - lower <= rel_cov < upper → missing (no-call)
+/// - rel_cov >= upper → 1
 ///
-/// For ploidy 2 with 2 thresholds [het_lower, het_upper]:
-/// - rel_cov < het_lower = 0/0
-/// - het_lower <= rel_cov < het_upper = 0/1
-/// - rel_cov >= het_upper = 1/1
+/// For ploidy 2 with 2 thresholds [t1, t2] (default: 0.5, 1.5):
+/// - rel_cov < t1 → 0/0 (0 copies, coverage ~0x ref)
+/// - t1 <= rel_cov < t2 → 0/1 (1 copy, coverage ~1x ref)
+/// - rel_cov >= t2 → 1/1 (2 copies, coverage ~2x ref)
 ///
 /// For ploidy 2 with 4 thresholds [t1, t2, t3, t4]:
-/// - rel_cov < t1 = 0/0
-/// - t1 <= rel_cov < t2 = missing (no-call)
-/// - t2 <= rel_cov < t3 = 0/1
-/// - t3 <= rel_cov < t4 = missing (no-call)
-/// - rel_cov >= t4 = 1/1
+/// - rel_cov < t1 → 0/0
+/// - t1 <= rel_cov < t2 → missing (no-call)
+/// - t2 <= rel_cov < t3 → 0/1
+/// - t3 <= rel_cov < t4 → missing (no-call)
+/// - rel_cov >= t4 → 1/1
 ///
 /// where rel_cov = coverage / ref_coverage
 fn call_zygosity(

@@ -121,18 +121,24 @@ Format: `feature_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
 
 ## Genotype calling
 
-Genotypes are called using coverage thresholds relative to each sample's reference coverage (`ref`). Thresholds must be positive and strictly ascending. `ref` is defined as each sample's mean or median coverage across features with coverage above `--min-coverage` (default: 0.0).
+Genotypes are called using a **copy-number model** where coverage is normalized to haploid (single-copy) coverage. Thresholds must be positive and strictly ascending.
+
+**Reference coverage (`ref`):** Each sample's mean or median coverage across features (with coverage above `--min-coverage`), divided by ploidy to estimate haploid coverage.
+
+**Copy-number interpretation:**
+- **Ploidy 1**: 0 copies = 0×ref, 1 copy = 1×ref
+- **Ploidy 2**: 0 copies = 0×ref, 1 copy (0/1) = 1×ref, 2 copies (1/1) = 2×ref
 
 ### Simple mode (default)
 
 **Ploidy 1**: specify a `threshold` (default `threshold=0.5`):
-- `coverage < threshold×ref → 0`
-- `coverage ≥ threshold×ref → 1`
+- `coverage < threshold×ref → 0` (absent)
+- `coverage ≥ threshold×ref → 1` (present)
 
-**Ploidy 2**: specify `low` and `high` thresholds (default `low=0.25, high=0.75`):
-- `coverage < low×ref → 0/0`
-- `low×ref ≤ coverage < high×ref → 0/1`
-- `coverage ≥ high×ref → 1/1`
+**Ploidy 2**: specify `low` and `high` thresholds (default `low=0.5, high=1.5`):
+- `coverage < low×ref → 0/0` (0 copies, ~0×ref)
+- `low×ref ≤ coverage < high×ref → 0/1` (1 copy, ~1×ref)
+- `coverage ≥ high×ref → 1/1` (2 copies, ~2×ref)
 
 ### No-call mode
 
@@ -140,21 +146,21 @@ To mark uncertain genotypes as missing:
 
 **Ploidy 1**: specify 2 values to create a no-call zone:
 ```bash
-pangosity -s samples.txt -g genotypes.tsv -p 1 -c 0.4,0.6
+pangosity -s samples.txt -g genotypes.tsv -p 1 -c 0.3,0.7
 ```
-- `coverage < 0.4×ref → 0`
-- `0.4×ref ≤ coverage < 0.6×ref → .` (no-call)
-- `coverage ≥ 0.6×ref → 1`
+- `coverage < 0.3×ref → 0`
+- `0.3×ref ≤ coverage < 0.7×ref → .` (no-call)
+- `coverage ≥ 0.7×ref → 1`
 
 **Ploidy 2**: specify 4 values to create no-call zones:
 ```bash
-pangosity -s samples.txt -g genotypes.tsv -p 2 -c 0.15,0.35,0.65,0.85
+pangosity -s samples.txt -g genotypes.tsv -p 2 -c 0.3,0.7,1.3,1.7
 ```
-- `coverage < 0.15×ref → 0/0`
-- `0.15×ref ≤ coverage < 0.35×ref → ./.` (no-call)
-- `0.35×ref ≤ coverage < 0.65×ref → 0/1`
-- `0.65×ref ≤ coverage < 0.85×ref → ./.` (no-call)
-- `coverage ≥ 0.85×ref → 1/1`
+- `coverage < 0.3×ref → 0/0` (confident absent)
+- `0.3×ref ≤ coverage < 0.7×ref → ./.` (no-call, uncertain 0/0 vs 0/1)
+- `0.7×ref ≤ coverage < 1.3×ref → 0/1` (confident heterozygous, ~1 copy)
+- `1.3×ref ≤ coverage < 1.7×ref → ./.` (no-call, uncertain 0/1 vs 1/1)
+- `coverage ≥ 1.7×ref → 1/1` (confident homozygous, ~2 copies)
 
 ## Feature coverage filtering
 
