@@ -87,55 +87,42 @@ Coverage files in tall format:
 
 ### Output
 
-**Genotype matrix** (tab-separated):
+**Which output format to use:**
+- **GWAS with GEMMA** → `-b, --dosage-bimbam` (CSV format required by GEMMA)
+- **VCF-style variant tools** → `-g, --genotype-matrix` (0/0, 0/1, 1/1 notation)
+- **General quantitative analysis** → `-d, --dosage-matrix` (numeric copy counts)
+- **QC, visualization, custom thresholds** → `-n, --copynumber-matrix` (continuous values)
+- **Filtering outlier features** → `--feature-cov-mask` (binary keep/filter mask)
 
+---
+
+**Genotype matrix** (`-g`): VCF-style genotypes
 ```
-#feature   sample1     sample2     sample3
-1          0/0         0/1         1/1
-2          0/1         1/1         0/0
+#feature   sample1   sample2   sample3
+1          0/0       0/1       1/1
 ```
+Ploidy 1: `0`, `1`, `.` | Ploidy 2: `0/0`, `0/1`, `1/1`, `./.`
 
-- **Haploid** (ploidy=1): `0` (absent), `1` (present), `.` (missing)
-- **Diploid** (ploidy=2): `0/0` (absent), `0/1` (heterozygous), `1/1` (present), `./.` (missing)
-
-**Dosage matrix** (tab-separated):
-
+**Dosage matrix** (`-d`): Numeric copy counts
 ```
-#feature   sample1     sample2     sample3
-1          0           1           2
-2          1           2           0
+#feature   sample1   sample2   sample3
+1          0         1         2
 ```
+Ploidy 1: `0`, `1`, `NA` | Ploidy 2: `0`, `1`, `2`, `NA`
 
-- **Haploid** (ploidy=1): `0` (absent), `1` (present), `NA` (missing)
-- **Diploid** (ploidy=2): `0` (0/0), `1` (0/1), `2` (1/1), `NA` (missing)
-
-**BIMBAM dosage matrix** (comma-separated):
-
+**BIMBAM dosage** (`-b`): CSV format for GEMMA
 ```
 N1,A,T,0,1,2
 N2,A,T,1,2,0
-N3,A,T,0,0,1
 ```
+Format: `feature_id,ref,alt,dosage1,dosage2,...`
 
-Format: `feature_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
-
-- Features as rows, samples as columns
-- Alleles: A (reference), T (alternate)
-- Missing dosages written as `NA`
-
-**Copy-number matrix** (tab-separated):
-
+**Copy-number matrix** (`-n`): Continuous relative coverage
 ```
-#feature   sample1     sample2     sample3
-1          0.021       0.987       1.943
-2          1.124       2.031       0.105
+#feature   sample1   sample2   sample3
+1          0.021     0.987     1.943
 ```
-
-- Continuous relative coverage values: `coverage / haploid_coverage`
-- Shows raw copy-number estimates before discretization
-- Values ≈ 0 (absent), ≈ 1 (1 copy), ≈ 2 (2 copies for diploid)
-- Useful for QC, visualization, and detecting borderline calls
-- Values > ploidy may indicate duplications/aneuploidies
+Values = `coverage / haploid_coverage`. For QC, visualization, borderline call detection. Values > ploidy indicate duplications.
 
 ## Genotype calling
 
