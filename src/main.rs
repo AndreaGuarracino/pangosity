@@ -159,7 +159,7 @@ struct Args {
     #[arg(short, help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
-    /// Minimum coverage threshold for including features in normalization calculations
+    /// Minimum coverage threshold for including features in haploid coverage estimation
     #[arg(help_heading = "Calling parameters", long, default_value = "0.0")]
     min_coverage: f64,
 
@@ -947,7 +947,7 @@ fn write_copynumber_matrix(
     Ok(())
 }
 
-/// Compute mean coverage (only values above threshold)
+/// Compute mean coverage for haploid coverage estimation (only values above threshold)
 fn compute_mean(values: &[f64], threshold: f64) -> f64 {
     let (sum, count) = values
         .iter()
@@ -956,7 +956,7 @@ fn compute_mean(values: &[f64], threshold: f64) -> f64 {
     if count == 0 { 0.0 } else { sum / count as f64 }
 }
 
-/// Compute median coverage (only values above threshold)
+/// Compute median coverage for haploid coverage estimation (only values above threshold)
 fn compute_median(values: &[f64], threshold: f64) -> f64 {
     let mut filtered: Vec<f64> = values.iter().filter(|&&x| x > threshold).copied().collect();
     if filtered.is_empty() {
