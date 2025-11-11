@@ -62,9 +62,15 @@ fn process_input_to_coverage(
         }
         InputFormat::Gaf => {
             // Convert GAF to coverage using pre-parsed segments
-            let gfa = gfa_data
-                .as_ref()
-                .expect("GFA data should be available for GAF input");
+            let gfa = gfa_data.as_ref().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Detected GAF input '{}' but no GFA graph was provided. Use --gfa to specify the graph file.",
+                        input_path
+                    ),
+                )
+            })?;
             gafpack::compute_coverage_with_segments(&gfa.0, gfa.1, input_path, true, false)
                 .map_err(|e| std::io::Error::other(e))
         }
@@ -411,28 +417,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Create coverage output directory only if GAF files are present
+    // Create coverage output directory if requested
     if let Some(ref dir) = args.save_coverage {
-        if !has_gaf {
-            warn!("--save-coverage specified but no GAF files detected.");
-        } else if let Err(e) = std::fs::create_dir_all(dir) {
+        if let Err(e) = std::fs::create_dir_all(dir) {
             error!("Failed to create coverage directory '{}': {}", dir, e);
             std::process::exit(1);
         }
+        if !has_gaf {
+            warn!("--save-coverage specified but no GAF files detected.");
+        }
     }
 
-    // Parse GFA only if needed (i.e., if there are GAF files in the sample table)
+    // Parse GFA graph if provided (needed for GAF inputs)
     let gfa_data = if let Some(ref gfa_path) = args.gfa {
         if has_gaf {
             info!("Parsing GFA graph from {}", gfa_path);
-            let gfa = gafpack::parse_gfa(gfa_path)
-                .map_err(|e| std::io::Error::other(e))?;
-            debug!("Parsed GFA: {} segments, min_id={}", gfa.0.len(), gfa.1);
-            Some(Arc::new(gfa))
         } else {
-            warn!("No GAF files detected in sample table, skipping GFA parsing");
-            None
+            warn!("--gfa provided but no GAF files were detected by extension in the sample table; parsing graph anyway");
         }
+        let gfa = gafpack::parse_gfa(gfa_path)
+            .map_err(|e| std::io::Error::other(e))?;
+        debug!("Parsed GFA: {} segments, min_id={}", gfa.0.len(), gfa.1);
+        Some(Arc::new(gfa))
     } else {
         None
     };
@@ -512,7 +518,6 @@ fn validate_sample_table(sample_table: &str) -> std::io::Result<bool> {
             std::process::exit(1);
         }
         let input_path = fields[1];
-        // Use detect_format to properly detect GAF files
         if let Ok(InputFormat::Gaf) = detect_format(input_path) {
             return Ok(true);
         }
@@ -553,6 +558,14 @@ fn load_samples(
             } else {
                 compute_median(&coverage, min_cov_threshold)
             };
+
+            if typical_coverage <= 0.0 {
+                error!(
+                    "Sample '{}' has no coverage values above --min-coverage ({}). Cannot estimate haploid coverage.",
+                    sample_name, min_cov_threshold
+                );
+                std::process::exit(1);
+            }
 
             // Convert to haploid coverage estimate
             let haploid_coverage = typical_coverage / ploidy as f64;

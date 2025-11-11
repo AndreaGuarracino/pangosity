@@ -68,7 +68,7 @@ Coverage files in tall format:
 **Calling parameters:**
 - `-p, --ploidy`: Ploidy level (1 or 2) [default: 2]
 - `-m, --norm-method`: Normalization method (mean or median) [default: median]
-- `-c, --calling-thresholds`: Genotype calling thresholds [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
+- `-c, --calling-thresholds`: Genotype calling thresholds [default: 0.5 if ploidy=1; 0.5,1.5 if ploidy=2]
 - `--min-coverage`: Minimum coverage for including features in normalization calculations [default: 0.0]
 
 **Output:**
