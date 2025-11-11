@@ -169,6 +169,10 @@ struct Args {
     #[arg(help_heading = "Output", short = 'b', long)]
     dosage_bimbam: Option<String>,
 
+    /// Output copy-number matrix file (continuous relative coverage values)
+    #[arg(help_heading = "Output", short = 'n', long)]
+    copynumber_matrix: Option<String>,
+
     /// Output feature coverage mask file (1=keep, 0=filter outliers)
     #[arg(help_heading = "Output", long)]
     feature_cov_mask: Option<String>,
@@ -199,7 +203,7 @@ struct Args {
 struct Sample {
     name: String,
     coverage: Vec<f64>,
-    ref_coverage: f64,
+    haploid_coverage: f64,
 }
 
 /// Zygosity genotype for diploid
@@ -269,9 +273,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.genotype_matrix.is_none()
         && args.dosage_matrix.is_none()
         && args.dosage_bimbam.is_none()
+        && args.copynumber_matrix.is_none()
     {
         error!(
-            "At least one output must be specified: --genotype-matrix, --dosage-matrix, or --dosage-bimbam"
+            "At least one output must be specified: --genotype-matrix, --dosage-matrix, --dosage-bimbam, or --copynumber-matrix"
         );
         std::process::exit(1);
     }
@@ -484,6 +489,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
 
+    // Write copy-number matrix if requested
+    if let Some(ref copynumber_path) = args.copynumber_matrix {
+        info!("Writing copy-number matrix to {}", copynumber_path);
+        write_copynumber_matrix(&samples, copynumber_path)?;
+    }
+
     info!("Done!");
     Ok(())
 }
@@ -544,15 +555,15 @@ fn load_samples(
             };
 
             // Convert to haploid coverage estimate
-            let ref_coverage = typical_coverage / ploidy as f64;
+            let haploid_coverage = typical_coverage / ploidy as f64;
 
             debug!(
-                "Loaded sample {} ({} features, {}={:.2}, haploid ref={:.2} on {} features > {})",
+                "Loaded sample {} ({} features, {}={:.2}, haploid={:.2} on {} features > {})",
                 sample_name,
                 coverage.len(),
                 norm_method,
                 typical_coverage,
-                ref_coverage,
+                haploid_coverage,
                 coverage.iter().filter(|&&x| x > min_cov_threshold).count(),
                 min_cov_threshold
             );
@@ -571,7 +582,7 @@ fn load_samples(
             Sample {
                 name: sample_name,
                 coverage,
-                ref_coverage,
+                haploid_coverage,
             }
         })
         .collect();
@@ -637,11 +648,11 @@ fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
 }
 
 /// Call zygosity for a single feature based on coverage and ploidy
-/// Uses copy-number model where ref_coverage = haploid coverage
+/// Uses copy-number model where haploid_coverage = single-copy coverage
 ///
 /// Copy-number interpretation:
-/// - Ploidy 1: 0 copies = 0x ref, 1 copy = 1x ref
-/// - Ploidy 2: 0 copies = 0x ref, 1 copy = 1x ref, 2 copies = 2x ref
+/// - Ploidy 1: 0 copies = 0x haploid, 1 copy = 1x haploid
+/// - Ploidy 2: 0 copies = 0x haploid, 1 copy = 1x haploid, 2 copies = 2x haploid
 ///
 /// For ploidy 1 with 1 threshold [t]:
 /// - rel_cov < t → 0 (absent)
@@ -653,9 +664,9 @@ fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
 /// - rel_cov >= upper → 1
 ///
 /// For ploidy 2 with 2 thresholds [t1, t2] (default: 0.5, 1.5):
-/// - rel_cov < t1 → 0/0 (0 copies, coverage ~0x ref)
-/// - t1 <= rel_cov < t2 → 0/1 (1 copy, coverage ~1x ref)
-/// - rel_cov >= t2 → 1/1 (2 copies, coverage ~2x ref)
+/// - rel_cov < t1 → 0/0 (0 copies, coverage ~0x haploid)
+/// - t1 <= rel_cov < t2 → 0/1 (1 copy, coverage ~1x haploid)
+/// - rel_cov >= t2 → 1/1 (2 copies, coverage ~2x haploid)
 ///
 /// For ploidy 2 with 4 thresholds [t1, t2, t3, t4]:
 /// - rel_cov < t1 → 0/0
@@ -664,14 +675,14 @@ fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
 /// - t3 <= rel_cov < t4 → missing (no-call)
 /// - rel_cov >= t4 → 1/1
 ///
-/// where rel_cov = coverage / ref_coverage
+/// where rel_cov = coverage / haploid_coverage
 fn call_zygosity(
     coverage: f64,
-    ref_coverage: f64,
+    haploid_coverage: f64,
     ploidy: u8,
     thresholds: &[f64],
 ) -> Zygosity {
-    let rel_cov = coverage / ref_coverage;
+    let rel_cov = coverage / haploid_coverage;
 
     match (ploidy, thresholds.len()) {
         // Ploidy 1, simple mode: single threshold
@@ -781,7 +792,7 @@ fn write_zygosity_matrix(
             let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
-                sample.ref_coverage,
+                sample.haploid_coverage,
                 ploidy,
                 thresholds,
             );
@@ -832,7 +843,7 @@ fn write_dosage_matrix(
             let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
-                sample.ref_coverage,
+                sample.haploid_coverage,
                 ploidy,
                 thresholds,
             );
@@ -873,12 +884,49 @@ fn write_dosage_bimbam(
             let coverage = sample.coverage[feature_idx];
             let zygosity = call_zygosity(
                 coverage,
-                sample.ref_coverage,
+                sample.haploid_coverage,
                 ploidy,
                 thresholds,
             );
 
             write!(file, ",{}", zygosity.to_dosage(ploidy))?;
+        }
+        writeln!(file)?;
+    }
+
+    Ok(())
+}
+
+/// Write copy-number matrix (continuous relative coverage values)
+fn write_copynumber_matrix(
+    samples: &[Sample],
+    output_path: &str,
+) -> std::io::Result<()> {
+    if samples.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "No samples to write",
+        ));
+    }
+
+    let num_features = samples[0].coverage.len();
+    let mut file = File::create(output_path)?;
+
+    // Write header
+    write!(file, "#feature")?;
+    for sample in samples {
+        write!(file, "\t{}", sample.name)?;
+    }
+    writeln!(file)?;
+
+    // Write relative coverage for each feature
+    for feature_idx in 0..num_features {
+        write!(file, "{}", feature_idx + 1)?;
+
+        for sample in samples {
+            let coverage = sample.coverage[feature_idx];
+            let rel_cov = coverage / sample.haploid_coverage;
+            write!(file, "\t{:.3}", rel_cov)?;
         }
         writeln!(file)?;
     }

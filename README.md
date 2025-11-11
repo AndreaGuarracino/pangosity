@@ -29,6 +29,9 @@ pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv --save-coverage covera
 # Multiple output formats
 pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv -d dosages.tsv -b dosages.bimbam
 
+# With copy-number matrix (continuous values for QC)
+pangosity -s samples.txt -g genotypes.tsv -n copynumbers.tsv
+
 # Mixed input formats (automatically detected)
 pangosity -s mixed_samples.txt --gfa graph.gfa -d dosages.tsv
 ```
@@ -72,6 +75,7 @@ Coverage files in tall format:
 - `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
 - `-d, --dosage-matrix`: Output dosage matrix file (0,1 if ploidy=1; 0,1,2 if ploidy=2)
 - `-b, --dosage-bimbam`: Output dosage matrix file in BIMBAM format (feature,ref,alt,dosages...)
+- `-n, --copynumber-matrix`: Output copy-number matrix file (continuous relative coverage values)
 - `--feature-cov-mask`: Output feature coverage mask file (1=keep, 0=filter outliers)
 - `--save-coverage`: Save computed coverage to directory as compressed PACK files (for GAF inputs)
 
@@ -119,26 +123,40 @@ Format: `feature_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
 - Alleles: A (reference), T (alternate)
 - Missing dosages written as `NA`
 
+**Copy-number matrix** (tab-separated):
+
+```
+#feature   sample1     sample2     sample3
+1          0.021       0.987       1.943
+2          1.124       2.031       0.105
+```
+
+- Continuous relative coverage values: `coverage / haploid_coverage`
+- Shows raw copy-number estimates before discretization
+- Values ≈ 0 (absent), ≈ 1 (1 copy), ≈ 2 (2 copies for diploid)
+- Useful for QC, visualization, and detecting borderline calls
+- Values > ploidy may indicate duplications/aneuploidies
+
 ## Genotype calling
 
 Genotypes are called using a **copy-number model** where coverage is normalized to haploid (single-copy) coverage. Thresholds must be positive and strictly ascending.
 
-**Reference coverage (`ref`):** Each sample's mean or median coverage across features (with coverage above `--min-coverage`), divided by ploidy to estimate haploid coverage.
+**Haploid coverage:** Each sample's mean or median coverage across features (with coverage above `--min-coverage`), divided by ploidy to estimate single-copy coverage.
 
 **Copy-number interpretation:**
-- **Ploidy 1**: 0 copies = 0×ref, 1 copy = 1×ref
-- **Ploidy 2**: 0 copies = 0×ref, 1 copy (0/1) = 1×ref, 2 copies (1/1) = 2×ref
+- **Ploidy 1**: 0 copies = 0×haploid, 1 copy = 1×haploid
+- **Ploidy 2**: 0 copies = 0×haploid, 1 copy (0/1) = 1×haploid, 2 copies (1/1) = 2×haploid
 
 ### Simple mode (default)
 
 **Ploidy 1**: specify a `threshold` (default `threshold=0.5`):
-- `coverage < threshold×ref → 0` (absent)
-- `coverage ≥ threshold×ref → 1` (present)
+- `coverage < threshold×haploid → 0` (absent)
+- `coverage ≥ threshold×haploid → 1` (present)
 
 **Ploidy 2**: specify `low` and `high` thresholds (default `low=0.5, high=1.5`):
-- `coverage < low×ref → 0/0` (0 copies, ~0×ref)
-- `low×ref ≤ coverage < high×ref → 0/1` (1 copy, ~1×ref)
-- `coverage ≥ high×ref → 1/1` (2 copies, ~2×ref)
+- `coverage < low×haploid → 0/0` (0 copies, ~0×haploid)
+- `low×haploid ≤ coverage < high×haploid → 0/1` (1 copy, ~1×haploid)
+- `coverage ≥ high×haploid → 1/1` (2 copies, ~2×haploid)
 
 ### No-call mode
 
@@ -148,19 +166,19 @@ To mark uncertain genotypes as missing:
 ```bash
 pangosity -s samples.txt -g genotypes.tsv -p 1 -c 0.3,0.7
 ```
-- `coverage < 0.3×ref → 0`
-- `0.3×ref ≤ coverage < 0.7×ref → .` (no-call)
-- `coverage ≥ 0.7×ref → 1`
+- `coverage < 0.3×haploid → 0`
+- `0.3×haploid ≤ coverage < 0.7×haploid → .` (no-call)
+- `coverage ≥ 0.7×haploid → 1`
 
 **Ploidy 2**: specify 4 values to create no-call zones:
 ```bash
 pangosity -s samples.txt -g genotypes.tsv -p 2 -c 0.3,0.7,1.3,1.7
 ```
-- `coverage < 0.3×ref → 0/0` (confident absent)
-- `0.3×ref ≤ coverage < 0.7×ref → ./.` (no-call, uncertain 0/0 vs 0/1)
-- `0.7×ref ≤ coverage < 1.3×ref → 0/1` (confident heterozygous, ~1 copy)
-- `1.3×ref ≤ coverage < 1.7×ref → ./.` (no-call, uncertain 0/1 vs 1/1)
-- `coverage ≥ 1.7×ref → 1/1` (confident homozygous, ~2 copies)
+- `coverage < 0.3×haploid → 0/0` (confident absent)
+- `0.3×haploid ≤ coverage < 0.7×haploid → ./.` (no-call, uncertain 0/0 vs 0/1)
+- `0.7×haploid ≤ coverage < 1.3×haploid → 0/1` (confident heterozygous, ~1 copy)
+- `1.3×haploid ≤ coverage < 1.7×haploid → ./.` (no-call, uncertain 0/1 vs 1/1)
+- `coverage ≥ 1.7×haploid → 1/1` (confident homozygous, ~2 copies)
 
 ## Feature coverage filtering
 
