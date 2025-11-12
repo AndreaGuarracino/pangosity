@@ -11,13 +11,14 @@ args <- commandArgs(trailingOnly = TRUE)
 
 # All arguments are now required
 if (length(args) < 6) {
-  cat("Usage: Rscript plot_pangosity.R <samples.txt> <zygosity.tsv> <node_lengths.tsv> <output.pdf> <panplexity_mask.txt> <node_coverage_mask.txt>\n")
+  cat("Usage: Rscript plot_pangosity.R <samples.txt> <zygosity.tsv> <node_lengths.tsv> <output.pdf> <panplexity_mask.txt> <node_coverage_mask.txt> [thresholds]\n")
   cat("  samples.txt: Input file with sample_name<tab>coverage_file\n")
   cat("  zygosity.tsv: Output zygosity matrix from pangosity\n")
   cat("  node_lengths.tsv: 2-column file with node_id<tab>length\n")
   cat("  output.pdf: Output plot file\n")
   cat("  panplexity_mask.txt: File with mask values (0=low-complexity, 1=not masked), one per line per node\n")
   cat("  node_coverage_mask.txt: File with node coverage mask values, one per line per node\n")
+  cat("  thresholds: Optional comma-separated list of coverage thresholds to annotate (e.g., '10,20,50')\n")
   quit(status = 1)
 }
 
@@ -27,6 +28,17 @@ node_lengths_file <- args[3]
 output_pdf <- args[4]
 panplexity_mask_file <- args[5]
 node_coverage_mask_file <- args[6]
+
+# Parse optional thresholds
+thresholds <- NULL
+if (length(args) >= 7 && args[7] != "") {
+  threshold_values <- as.numeric(unlist(strsplit(args[7], ",")))
+  threshold_values <- threshold_values[!is.na(threshold_values)]
+  if (length(threshold_values) > 0) {
+    thresholds <- threshold_values
+    cat("Coverage thresholds specified:", paste(thresholds, collapse = ", "), "\n")
+  }
+}
 
 cat("Reading zygosity matrix:", zygosity_file, "\n")
 # Read zygosity matrix
@@ -48,13 +60,10 @@ coverage_list <- lapply(1:nrow(samples), function(i) {
     # Pack format: ##sample: name\n#coverage\nvalue1\nvalue2\n...
     cat("    Detected pack format\n")
     
-    # Optionally extract sample name from ##sample: line
-    # sample_name_from_file <- sub("^##sample:\\s*", "", lines[1])
-    # cat("    Sample from file:", sample_name_from_file, "\n")
-    
     # Filter out header lines (starting with #) and empty lines
     data_lines <- lines[!grepl("^#", lines) & lines != ""]
-    tibble(sample = samples$sample[i], node = 0:(length(data_lines)-1), coverage = as.numeric(data_lines))
+    # Changed from 0:(length(data_lines)-1) to 1:length(data_lines)
+    tibble(sample = samples$sample[i], node = 1:length(data_lines), coverage = as.numeric(data_lines))
     
   } else if (length(lines) > 0 && grepl("^#sample\\t", lines[1])) {
     # Row format: #sample\tnode.1\tnode.2\t...
@@ -62,13 +71,15 @@ coverage_list <- lapply(1:nrow(samples), function(i) {
     cov_data <- read_tsv(samples$coverage_file[i], comment = "", show_col_types = FALSE)
     sample_name <- cov_data[[1]][1]
     cov_values <- as.numeric(cov_data[1, -1])
-    tibble(sample = samples$sample[i], node = 0:(length(cov_values)-1), coverage = cov_values)
+    # Changed from 0:(length(cov_values)-1) to 1:length(cov_values)
+    tibble(sample = samples$sample[i], node = 1:length(cov_values), coverage = cov_values)
     
   } else {
     # Column format: one value per line (with optional # comments)
     cat("    Detected column format\n")
     data_lines <- lines[!grepl("^#", lines) & lines != ""]
-    tibble(sample = samples$sample[i], node = 0:(length(data_lines)-1), coverage = as.numeric(data_lines))
+    # Changed from 0:(length(data_lines)-1) to 1:length(data_lines)
+    tibble(sample = samples$sample[i], node = 1:length(data_lines), coverage = as.numeric(data_lines))
   }
 })
 coverage <- bind_rows(coverage_list)
@@ -90,7 +101,7 @@ mask_lines <- mask_lines[!grepl("^#", mask_lines) & mask_lines != ""]
 mask_values <- as.integer(mask_lines)
 
 panplexity_mask <- tibble(
-  node = 0:(length(mask_values)-1),
+  node = 1:length(mask_values),  # Changed from 0:(length(mask_values)-1)
   masked = mask_values
 ) %>%
   mutate(masked_label = ifelse(masked == 0, "Low-complexity", "Not masked")) %>%
@@ -106,7 +117,7 @@ coverage_mask_lines <- coverage_mask_lines[!grepl("^#", coverage_mask_lines) & c
 coverage_mask_values <- as.integer(coverage_mask_lines)
 
 node_coverage_mask <- tibble(
-  node = 0:(length(coverage_mask_values)-1),
+  node = 1:length(coverage_mask_values),  # Changed from 0:(length(coverage_mask_values)-1)
   coverage_masked = coverage_mask_values
 ) %>%
   mutate(coverage_masked_label = ifelse(coverage_masked == 0, "Masked", "Not masked")) %>%
@@ -340,6 +351,13 @@ if (has_het) {
 }
 
 # Plot 3b: Panplexity mask across nodes (only show low-complexity nodes)
+# Check which categories exist in the data
+panplexity_categories <- panplexity_mask %>% 
+  filter(!is.na(masked)) %>% 
+  pull(masked_label) %>% 
+  unique()
+
+# Build the plot
 p3b <- ggplot(panplexity_mask %>% filter(!is.na(masked))) +
   geom_rect(
     aes(xmin = cum_start, xmax = cum_end, ymin = 0, ymax = 1, fill = masked_label),
@@ -349,7 +367,8 @@ p3b <- ggplot(panplexity_mask %>% filter(!is.na(masked))) +
   scale_fill_manual(
     values = c("Low-complexity" = "#d73027", "Not masked" = "transparent"),
     name = "Panplexity mask",
-    guide = guide_legend(override.aes = list(fill = c("#d73027", "white"), color = c("black", "black")))
+    breaks = c("Low-complexity", "Not masked"),
+    drop = FALSE
   ) +
   facet_wrap(~"Pangenome", ncol = 1, strip.position = "right") +
   labs(
@@ -370,7 +389,24 @@ p3b <- ggplot(panplexity_mask %>% filter(!is.na(masked))) +
     plot.subtitle = element_text(hjust = 0.5)
   )
 
+# Override legend aesthetics only if needed (to show transparent as white)
+if (length(panplexity_categories) > 1) {
+  p3b <- p3b + guides(fill = guide_legend(
+    override.aes = list(
+      fill = c("Low-complexity" = "#d73027", "Not masked" = "white"),
+      color = c("Low-complexity" = "black", "Not masked" = "black")
+    )
+  ))
+}
+
 # Plot 3c: Node coverage mask across nodes (only show masked nodes)
+# Check which categories exist in the data
+coverage_mask_categories <- node_coverage_mask %>% 
+  filter(!is.na(coverage_masked)) %>% 
+  pull(coverage_masked_label) %>% 
+  unique()
+
+# Build the plot
 p3c <- ggplot(node_coverage_mask %>% filter(!is.na(coverage_masked))) +
   geom_rect(
     aes(xmin = cum_start, xmax = cum_end, ymin = 0, ymax = 1, fill = coverage_masked_label),
@@ -380,7 +416,8 @@ p3c <- ggplot(node_coverage_mask %>% filter(!is.na(coverage_masked))) +
   scale_fill_manual(
     values = c("Masked" = "#e66101", "Not masked" = "transparent"),
     name = "Node coverage mask",
-    guide = guide_legend(override.aes = list(fill = c("#e66101", "white"), color = c("black", "black")))
+    breaks = c("Masked", "Not masked"),
+    drop = FALSE
   ) +
   facet_wrap(~"Node coverage", ncol = 1, strip.position = "right") +
   labs(
@@ -401,53 +438,38 @@ p3c <- ggplot(node_coverage_mask %>% filter(!is.na(coverage_masked))) +
     plot.subtitle = element_text(hjust = 0.5)
   )
 
+# Override legend aesthetics only if needed (to show transparent as white)
+if (length(coverage_mask_categories) > 1) {
+  p3c <- p3c + guides(fill = guide_legend(
+    override.aes = list(
+      fill = c("Masked" = "#e66101", "Not masked" = "white"),
+      color = c("Masked" = "black", "Not masked" = "black")
+    )
+  ))
+}
+
 # Plot 4: Coverage across nodes (rectangles scaled by node length)
-# Calculate max coverage per sample and where it occurs
-max_cov_per_sample <- coverage %>%
+# Calculate median coverage per sample
+median_cov_display <- coverage %>%
   filter(!is.na(coverage), coverage > 0) %>%
   group_by(sample) %>%
-  filter(coverage == max(coverage)) %>%
-  slice(1) %>%  # In case there are multiple nodes with the same max coverage, take the first
-  mutate(
-    max_coverage = coverage,
-    max_position = (cum_start + cum_end) / 2  # Use the center of the node
-  ) %>%
-  select(sample, max_coverage, max_position, node, cum_start, cum_end) %>%
-  ungroup()
-
-p4 <- ggplot(coverage %>% filter(!is.na(coverage), coverage > 0)) +
-  geom_rect(
-    aes(xmin = cum_start, xmax = cum_end, ymin = 0, ymax = coverage, fill = sample),
-    color = NA, alpha = 0.8
-  ) +
-  scale_x_continuous(limits = c(x_min, x_max), expand = c(0, 0)) +
-  # Add vertical lines at max coverage positions
-  geom_vline(data = max_cov_per_sample, aes(xintercept = max_position), 
-             color = "black", linetype = "dashed", linewidth = 0.6, alpha = 0.6) +
-  # Add horizontal lines for max coverage values
-  geom_hline(data = max_cov_per_sample, aes(yintercept = max_coverage), 
-             color = "black", linetype = "dashed", linewidth = 0.6, alpha = 0.6) +
-  # Add text annotation for max coverage value
-  geom_text(data = max_cov_per_sample, 
-            aes(x = Inf, y = max_coverage, label = sprintf("Max: %.1f", max_coverage)),
-            hjust = 1.2, vjust = 1.5, size = 3.5, color = "black", fontface = "bold") +
-  facet_wrap(~sample, ncol = 1, scales = "free_y", strip.position = "right") +
-  scale_y_continuous(trans = "log10") +
-  labs(
-    title = "Coverage across nodes", 
-    subtitle = "Rectangle width proportional to node length (log10 scale, zero coverage excluded). Dashed lines show maximum coverage.",
-    x = "Panenomic position (bp)", 
-    y = "Coverage (log10)"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    legend.position = "none",
-    strip.text.y = element_text(angle = 0),
-    plot.title = element_text(hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5)
+  summarise(
+    median_coverage = median(coverage),
+    max_coverage = max(coverage),
+    .groups = "drop"
   )
 
-# Plot 5: Low coverage across nodes (capped at median/2 for each sample)
+# Determine if we should use linear or log scale for coverage plots
+max_coverage_global <- max(median_cov_display$max_coverage, na.rm = TRUE)
+use_linear_scale <- max_coverage_global <= 500
+
+if (use_linear_scale) {
+  cat("Maximum coverage is", max_coverage_global, "(<= 500), using linear scale for coverage plots\n")
+} else {
+  cat("Maximum coverage is", max_coverage_global, "(> 500), using log10 scale for coverage plots\n")
+}
+
+
 # Calculate median coverage per sample for capping
 median_cov_per_sample <- coverage %>%
   filter(!is.na(coverage), coverage > 0) %>%
@@ -458,6 +480,85 @@ median_cov_per_sample <- coverage %>%
     .groups = "drop"
   )
 
+p4 <- ggplot(coverage %>% filter(!is.na(coverage), coverage > 0)) +
+  geom_rect(
+    aes(xmin = cum_start, xmax = cum_end, ymin = 0, ymax = coverage, fill = sample),
+    color = NA, alpha = 0.8
+  ) +
+  scale_x_continuous(limits = c(x_min, x_max), expand = c(0, 0)) +
+  # Add horizontal lines for median coverage values
+  geom_hline(data = median_cov_display, aes(yintercept = median_coverage), 
+             color = "black", linetype = "dashed", linewidth = 0.6, alpha = 0.6) +
+  # Add text annotation for median coverage value
+  geom_text(data = median_cov_display, 
+            aes(x = Inf, y = median_coverage, label = sprintf("Median: %.1f", median_coverage)),
+            hjust = 1.2, vjust = 1.5, size = 3.5, color = "black", fontface = "bold") +
+  facet_wrap(~sample, ncol = 1, scales = "fixed", strip.position = "right") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text.y = element_text(angle = 0),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+# Add threshold lines if specified
+if (!is.null(thresholds)) {
+  for (i in seq_along(thresholds)) {
+    threshold_val <- thresholds[i]
+    
+    # Add horizontal line for this threshold (always black)
+    p4 <- p4 + geom_hline(yintercept = threshold_val, 
+                          color = "black", 
+                          linetype = "dotted", 
+                          linewidth = 0.5, 
+                          alpha = 0.7)
+    
+    # Add text annotation for this threshold
+    # Stagger the vjust to avoid overlapping labels
+    vjust_offset <- -0.5 - (i - 1) * 1.2
+    p4 <- p4 + annotate("text", 
+                        x = Inf, 
+                        y = threshold_val, 
+                        label = sprintf("Threshold %d: %.1f", i, threshold_val),
+                        hjust = 1.2, 
+                        vjust = vjust_offset, 
+                        size = 3.5, 
+                        color = "black", 
+                        fontface = "bold")
+  }
+}
+
+# Conditionally apply scale and labels
+if (use_linear_scale) {
+  subtitle_text <- "Rectangle width proportional to node length (linear scale, zero coverage excluded). Dashed lines show median coverage."
+  if (!is.null(thresholds)) {
+    subtitle_text <- paste0(subtitle_text, " Dotted lines show thresholds.")
+  }
+  p4 <- p4 +
+    scale_y_continuous() +
+    labs(
+      title = "Coverage across nodes", 
+      subtitle = subtitle_text,
+      x = "Panenomic position (bp)", 
+      y = "Coverage"
+    )
+} else {
+  subtitle_text <- "Rectangle width proportional to node length (log10 scale, zero coverage excluded). Dashed lines show median coverage."
+  if (!is.null(thresholds)) {
+    subtitle_text <- paste0(subtitle_text, " Dotted lines show thresholds.")
+  }
+  p4 <- p4 +
+    scale_y_continuous(trans = "log10") +
+    labs(
+      title = "Coverage across nodes", 
+      subtitle = subtitle_text,
+      x = "Panenomic position (bp)", 
+      y = "Coverage (log10)"
+    )
+}
+
+# Plot 5: Low coverage across nodes (capped at median/5 for each sample)
 # Prepare capped coverage data
 coverage_capped <- coverage %>%
   left_join(median_cov_per_sample, by = "sample") %>%
@@ -472,7 +573,7 @@ p5 <- ggplot(coverage_capped %>% filter(!is.na(coverage_capped), coverage_capped
   facet_wrap(~sample, ncol = 1, scales = "free_y", strip.position = "right") +
   labs(
     title = "Low coverage regions across nodes", 
-    subtitle = "Y-axis capped at median/5 to highlight low coverage regions. Zero coverage excluded.",
+    subtitle = "Y-axis capped at median/5 to highlight low coverage regions. Zero coverage excluded. Dashed lines show cap.",
     x = "Panenomic position (bp)", 
     y = "Coverage"
   ) +
@@ -634,13 +735,35 @@ coverage_mask_stats <- node_coverage_mask %>%
   )
 print(coverage_mask_stats, n = Inf)
 
-# Print maximum coverage node information
-cat("\nMaximum Coverage Node Information:\n")
-max_cov_info <- max_cov_per_sample %>%
-  select(sample, node, max_coverage, max_position) %>%
-  mutate(
-    position_desc = sprintf("Node %d at position %.0f bp", node, max_position)
-  )
-print(max_cov_info, n = Inf)
+# Print median coverage information
+cat("\nMedian Coverage Information:\n")
+median_cov_info <- median_cov_display %>%
+  select(sample, median_coverage)
+print(median_cov_info, n = Inf)
+
+# Print threshold information if specified
+if (!is.null(thresholds)) {
+  cat("\nCoverage Thresholds Specified:\n")
+  cat("  Thresholds:", paste(thresholds, collapse = ", "), "\n")
+  
+  # Count nodes above/below each threshold
+  cat("\nNodes Meeting Threshold Criteria:\n")
+  for (i in seq_along(thresholds)) {
+    threshold_val <- thresholds[i]
+    threshold_stats <- coverage %>%
+      filter(!is.na(coverage), coverage > 0) %>%
+      group_by(sample) %>%
+      summarise(
+        nodes_above = sum(coverage >= threshold_val),
+        nodes_below = sum(coverage < threshold_val),
+        pct_above = (nodes_above / n()) * 100,
+        .groups = "drop"
+      ) %>%
+      mutate(threshold = threshold_val)
+    
+    cat(sprintf("\n  Threshold %d: %.1f\n", i, threshold_val))
+    print(threshold_stats %>% select(sample, nodes_above, nodes_below, pct_above), n = Inf)
+  }
+}
 
 cat("\nPlots saved to:", output_pdf, "\n")

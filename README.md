@@ -29,6 +29,9 @@ pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv --save-coverage covera
 # Multiple output formats
 pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv -d dosages.tsv -b dosages.bimbam
 
+# With copy-number matrix (continuous values for QC)
+pangosity -s samples.txt -g genotypes.tsv -n copynumbers.tsv
+
 # Mixed input formats (automatically detected)
 pangosity -s mixed_samples.txt --gfa graph.gfa -d dosages.tsv
 ```
@@ -65,13 +68,15 @@ Coverage files in tall format:
 **Calling parameters:**
 - `-p, --ploidy`: Ploidy level (1 or 2) [default: 2]
 - `-m, --norm-method`: Normalization method (mean or median) [default: median]
-- `-c, --calling-thresholds`: Calling thresholds (value if ploidy=1; lower,upper if ploidy=2) [default: 0.5 if ploidy=1; 0.25,0.75 if ploidy=2]
-- `--min-coverage`: Minimum coverage threshold (below: missing) [default: 0.0]
+- `-c, --calling-thresholds`: Genotype calling thresholds [default: 0.4 if ploidy=1; 0.6,1.4 if ploidy=2]
+- `--min-coverage`: Minimum coverage for including features in haploid coverage estimation [default: 0.0]
 
 **Output:**
 - `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
 - `-d, --dosage-matrix`: Output dosage matrix file (0,1 if ploidy=1; 0,1,2 if ploidy=2)
 - `-b, --dosage-bimbam`: Output dosage matrix file in BIMBAM format (feature,ref,alt,dosages...)
+- `-n, --copynumber-matrix`: Output copy-number matrix file (continuous relative coverage values)
+- `--debug-matrix`: Output debug matrix with all values (coverage, copy-number, genotype, dosage)
 - `--feature-cov-mask`: Output feature coverage mask file (1=keep, 0=filter outliers)
 - `--save-coverage`: Save computed coverage to directory as compressed PACK files (for GAF inputs)
 
@@ -83,45 +88,102 @@ Coverage files in tall format:
 
 ### Output
 
-**Genotype matrix** (tab-separated):
-```
-#feature   sample1     sample2     sample3
-1          0/0         0/1         1/1
-2          0/1         1/1         0/0
-```
+**Which output format to use:**
+- **GWAS with GEMMA** → `-b, --dosage-bimbam` (CSV format required by GEMMA)
+- **VCF-style variant tools** → `-g, --genotype-matrix` (0/0, 0/1, 1/1 notation)
+- **General quantitative analysis** → `-d, --dosage-matrix` (numeric copy counts)
+- **QC, visualization, custom thresholds** → `-n, --copynumber-matrix` (continuous values)
+- **Debugging genotype calls** → `--debug-matrix` (all values per feature/sample)
+- **Filtering outlier features** → `--feature-cov-mask` (binary keep/filter mask)
 
-- **Haploid** (ploidy=1): `0` (absent), `1` (present), `.` (missing)
-- **Diploid** (ploidy=2): `0/0` (absent), `0/1` (heterozygous), `1/1` (present), `./.` (missing)
+---
 
-**Dosage matrix** (tab-separated):
+**Genotype matrix** (`-g`): VCF-style genotypes
 ```
-#feature   sample1     sample2     sample3
-1          0           1           2
-2          1           2           0
+#feature   sample1   sample2   sample3
+1          0/0       0/1       1/1
 ```
+Ploidy 1: `0`, `1`, `.` | Ploidy 2: `0/0`, `0/1`, `1/1`, `./.`
 
-- **Haploid** (ploidy=1): `0` (absent), `1` (present), `NA` (missing)
-- **Diploid** (ploidy=2): `0` (0/0), `1` (0/1), `2` (1/1), `NA` (missing)
+**Dosage matrix** (`-d`): Numeric copy counts
+```
+#feature   sample1   sample2   sample3
+1          0         1         2
+```
+Ploidy 1: `0`, `1`, `NA` | Ploidy 2: `0`, `1`, `2`, `NA`
 
-**BIMBAM dosage matrix** (comma-separated):
+**BIMBAM dosage** (`-b`): CSV format for GEMMA
 ```
 N1,A,T,0,1,2
 N2,A,T,1,2,0
-N3,A,T,0,0,1
 ```
+Format: `feature_id,ref,alt,dosage1,dosage2,...`
 
-Format: `feature_id,ref_allele,alt_allele,dosage1,dosage2,dosage3,...`
-- No header row
-- Features as rows, samples as columns
-- Alleles: A (reference), T (alternate)
-- Missing dosages written as `NA`
+**Copy-number matrix** (`-n`): Continuous relative coverage
+```
+#feature   sample1   sample2   sample3
+1          0.021     0.987     1.943
+```
+Values = `coverage / haploid_coverage`. For QC, visualization, borderline call detection. Values > ploidy indicate duplications.
+
+**Debug matrix** (`--debug-matrix`): All values for debugging
+```
+##sample1:haploid_coverage=100.000
+##sample2:haploid_coverage=98.500
+#feature  sample1_cov  sample1_cn  sample1_gt  sample1_dosage  sample2_cov  sample2_cn  sample2_gt  sample2_dosage
+1         123.450      1.235       0/1         1               50.200       0.510       0/0         0
+```
+Comprehensive output with coverage, copy-number, genotype, and dosage for each sample. Header includes haploid coverage estimates. For debugging genotype calls.
 
 ## Genotype calling
 
-Genotypes are called using coverage thresholds relative to each sample's mean or median coverage (non-zero values only).
+Genotypes are called using a **copy-number model** where coverage is normalized to haploid (single-copy) coverage. Thresholds must be positive and strictly ascending.
 
-- **Haploid (ploidy 1)**: `coverage < t×ref → 0`, `coverage ≥ t×ref → 1` (default `t=0.5`)
-- **Diploid (ploidy 2)**: `coverage < L×ref → 0/0`, `L×ref ≤ coverage < U×ref → 0/1`, `coverage ≥ U×ref → 1/1` (default `L=0.25, U=0.75`)
+**Haploid coverage:** Each sample's mean or median coverage across features (with coverage above `--min-coverage`), divided by ploidy. This estimates the expected coverage for a **single copy** of a feature.
+
+**How genotypes relate to coverage:**
+
+For **Ploidy 1**:
+- Genotype `0` (absent) → **0 copies** → expected coverage ≈ **0**
+- Genotype `1` (present) → **1 copy** → expected coverage ≈ **haploid coverage** (the single-copy baseline)
+
+For **Ploidy 2**:
+- Genotype `0/0` (homozygous absent) → **0 copies** → expected coverage ≈ **0**
+- Genotype `0/1` (heterozygous) → **1 copy** → expected coverage ≈ **1× haploid coverage**
+- Genotype `1/1` (homozygous present) → **2 copies** → expected coverage ≈ **2× haploid coverage**
+
+### Simple mode (default)
+
+**Ploidy 1**: specify a `threshold` (default `threshold=0.4`):
+- `coverage < threshold×haploid_cov → 0` (absent)
+- `coverage ≥ threshold×haploid_coverage → 1` (present)
+
+**Ploidy 2**: specify `low` and `high` thresholds (default `low=0.6, high=1.4`):
+- `coverage < low×haploid_coverage → 0/0` (0 copies, ~0×haploid)
+- `low×haploid_coverage ≤ coverage < high×haploid_coverage → 0/1` (1 copy, ~1×haploid)
+- `coverage ≥ high×haploid_coverage → 1/1` (2 copies, ~2×haploid)
+
+### No-call mode
+
+To mark uncertain genotypes as missing:
+
+**Ploidy 1**: specify 2 values to create a no-call zone:
+```bash
+pangosity -s samples.txt -g genotypes.tsv -p 1 -c 0.3,0.7
+```
+- `coverage < 0.3×haploid_coverage → 0`
+- `0.3×haploid_coverage ≤ coverage < 0.7×haploid_coverage → .` (no-call)
+- `coverage ≥ 0.7×haploid_coverage → 1`
+
+**Ploidy 2**: specify 4 values to create no-call zones:
+```bash
+pangosity -s samples.txt -g genotypes.tsv -p 2 -c 0.3,0.7,1.3,1.7
+```
+- `coverage < 0.3×haploid_coverage → 0/0` (confident absent)
+- `0.3×haploid_coverage ≤ coverage < 0.7×haploid_coverage → ./.` (no-call, uncertain 0/0 vs 0/1)
+- `0.7×haploid_coverage ≤ coverage < 1.3×haploid_coverage → 0/1` (confident heterozygous, ~1 copy)
+- `1.3×haploid_coverage ≤ coverage < 1.7×haploid_coverage → ./.` (no-call, uncertain 0/1 vs 1/1)
+- `coverage ≥ 1.7×haploid_coverage → 1/1` (confident homozygous, ~2 copies)
 
 ## Feature coverage filtering
 
