@@ -155,7 +155,7 @@ struct Args {
     #[arg(help_heading = "Calling parameters", short, long, default_value = "2")]
     ploidy: u8,
 
-    /// Genotype calling thresholds [default: 0.5 if ploidy=1; 0.5,1.5 if ploidy=2]
+    /// Genotype calling thresholds [default: 0.4 if ploidy=1; 0.6,1.4 if ploidy=2]
     #[arg(short, help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
@@ -178,6 +178,10 @@ struct Args {
     /// Output copy-number matrix file (continuous relative coverage values)
     #[arg(help_heading = "Output", short = 'n', long)]
     copynumber_matrix: Option<String>,
+
+    /// Output debug matrix with all values (coverage, copy-number, genotype, dosage)
+    #[arg(help_heading = "Output", long)]
+    debug_matrix: Option<String>,
 
     /// Output feature coverage mask file (1=keep, 0=filter outliers)
     #[arg(help_heading = "Output", long)]
@@ -280,9 +284,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         && args.dosage_matrix.is_none()
         && args.dosage_bimbam.is_none()
         && args.copynumber_matrix.is_none()
+        && args.debug_matrix.is_none()
     {
         error!(
-            "At least one output must be specified: --genotype-matrix, --dosage-matrix, --dosage-bimbam, or --copynumber-matrix"
+            "At least one output must be specified: --genotype-matrix, --dosage-matrix, --dosage-bimbam, --copynumber-matrix, or --debug-matrix"
         );
         std::process::exit(1);
     }
@@ -347,9 +352,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         // Default thresholds (copy-number model)
         if args.ploidy == 1 {
-            vec![0.5]
+            vec![0.4]
         } else {
-            vec![0.5, 1.5]
+            vec![0.6, 1.4]
         }
     };
 
@@ -499,6 +504,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref copynumber_path) = args.copynumber_matrix {
         info!("Writing copy-number matrix to {}", copynumber_path);
         write_copynumber_matrix(&samples, copynumber_path)?;
+    }
+
+    // Write debug matrix if requested
+    if let Some(ref debug_path) = args.debug_matrix {
+        info!("Writing debug matrix to {}", debug_path);
+        write_debug_matrix(
+            &samples,
+            debug_path,
+            args.ploidy,
+            &calling_thresholds,
+        )?;
     }
 
     info!("Done!");
@@ -667,7 +683,7 @@ fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
 /// - Ploidy 1: 0 copies = 0x haploid, 1 copy = 1x haploid
 /// - Ploidy 2: 0 copies = 0x haploid, 1 copy = 1x haploid, 2 copies = 2x haploid
 ///
-/// For ploidy 1 with 1 threshold [t]:
+/// For ploidy 1 with 1 threshold [t] (default: 0.4):
 /// - rel_cov < t → 0 (absent)
 /// - rel_cov >= t → 1 (present)
 ///
@@ -676,7 +692,7 @@ fn compute_feature_filter_mask(samples: &[Sample]) -> Vec<u8> {
 /// - lower <= rel_cov < upper → missing (no-call)
 /// - rel_cov >= upper → 1
 ///
-/// For ploidy 2 with 2 thresholds [t1, t2] (default: 0.5, 1.5):
+/// For ploidy 2 with 2 thresholds [t1, t2] (default: 0.6, 1.4):
 /// - rel_cov < t1 → 0/0 (0 copies, coverage ~0x haploid)
 /// - t1 <= rel_cov < t2 → 0/1 (1 copy, coverage ~1x haploid)
 /// - rel_cov >= t2 → 1/1 (2 copies, coverage ~2x haploid)
@@ -940,6 +956,99 @@ fn write_copynumber_matrix(
             let coverage = sample.coverage[feature_idx];
             let rel_cov = coverage / sample.haploid_coverage;
             write!(file, "\t{:.3}", rel_cov)?;
+        }
+        writeln!(file)?;
+    }
+
+    Ok(())
+}
+
+/// Write debug matrix with all values for each feature/sample
+fn write_debug_matrix(
+    samples: &[Sample],
+    output_path: &str,
+    ploidy: u8,
+    thresholds: &[f64],
+) -> std::io::Result<()> {
+    if samples.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "No samples to write",
+        ));
+    }
+
+    let num_features = samples[0].coverage.len();
+    let mut file = File::create(output_path)?;
+
+    // Write sample haploid coverage and thresholds in header
+    for sample in samples {
+        write!(file, "##{}:haploid_coverage={:.3}", sample.name, sample.haploid_coverage)?;
+
+        // Convert thresholds from copy-number to absolute coverage
+        match (ploidy, thresholds.len()) {
+            // Ploidy 1, simple mode: single threshold
+            (1, 1) => {
+                let t = thresholds[0] * sample.haploid_coverage;
+                write!(file, ";thresholds=[cov<{:.3}→0, cov≥{:.3}→1]", t, t)?;
+            }
+            // Ploidy 1, no-call mode: lower and upper thresholds
+            (1, 2) => {
+                let t0 = thresholds[0] * sample.haploid_coverage;
+                let t1 = thresholds[1] * sample.haploid_coverage;
+                write!(file, ";thresholds=[cov<{:.3}→0, cov∈[{:.3},{:.3})→., cov≥{:.3}→1]",
+                       t0, t0, t1, t1)?;
+            }
+            // Ploidy 2, simple mode: het_lower and het_upper
+            (2, 2) => {
+                let t0 = thresholds[0] * sample.haploid_coverage;
+                let t1 = thresholds[1] * sample.haploid_coverage;
+                write!(file, ";thresholds=[cov<{:.3}→0/0, cov∈[{:.3},{:.3})→0/1, cov≥{:.3}→1/1]",
+                       t0, t0, t1, t1)?;
+            }
+            // Ploidy 2, no-call mode: 4 boundaries
+            (2, 4) => {
+                let t0 = thresholds[0] * sample.haploid_coverage;
+                let t1 = thresholds[1] * sample.haploid_coverage;
+                let t2 = thresholds[2] * sample.haploid_coverage;
+                let t3 = thresholds[3] * sample.haploid_coverage;
+                write!(file, ";thresholds=[cov<{:.3}→0/0, cov∈[{:.3},{:.3})→./., cov∈[{:.3},{:.3})→0/1, cov∈[{:.3},{:.3})→./., cov≥{:.3}→1/1]",
+                       t0, t0, t1, t1, t2, t2, t3, t3)?;
+            }
+            _ => {}
+        }
+        writeln!(file)?;
+    }
+
+    // Write column headers
+    write!(file, "#feature")?;
+    for sample in samples {
+        write!(file, "\t{}_cov\t{}_cn\t{}_gt\t{}_dosage",
+               sample.name, sample.name, sample.name, sample.name)?;
+    }
+    writeln!(file)?;
+
+    // Write data for each feature
+    for feature_idx in 0..num_features {
+        write!(file, "{}", feature_idx + 1)?;
+
+        for sample in samples {
+            let coverage = sample.coverage[feature_idx];
+            let copy_number = coverage / sample.haploid_coverage;
+            let zygosity = call_zygosity(
+                coverage,
+                sample.haploid_coverage,
+                ploidy,
+                thresholds,
+            );
+
+            let genotype = if ploidy == 1 {
+                zygosity.to_string_haploid()
+            } else {
+                zygosity.to_string()
+            };
+            let dosage = zygosity.to_dosage(ploidy);
+
+            write!(file, "\t{:.3}\t{:.3}\t{}\t{}", coverage, copy_number, genotype, dosage)?;
         }
         writeln!(file)?;
     }
