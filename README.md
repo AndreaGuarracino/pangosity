@@ -63,7 +63,9 @@ Coverage files in tall format:
 ### Parameters
 
 **Input:**
-- `-s, --sample-table`: Sample table file: sample_name<tab>coverage_file (supports .gz)
+- `-s, --sample-table`: Sample table file: sample_name<tab>input_file (PACK and GAF formats, .gz supported)
+- `--gfa`: GFA pangenome graph file (required for GAF inputs)
+
 
 **Calling parameters:**
 - `-p, --ploidy`: Ploidy level (1 or 2) [default: 2]
@@ -71,7 +73,7 @@ Coverage files in tall format:
 - `-c, --calling-thresholds`: Genotype calling thresholds [default: 0.4 if ploidy=1; 0.6,1.4 if ploidy=2]
 - `--min-coverage`: Minimum coverage for including features in haploid coverage estimation [default: 0.0]
 
-**Output:**
+**Output (at least one required):**
 - `-g, --genotype-matrix`: Output genotype matrix file (0,1 if ploidy=1; 0/0,0/1,1/1 if ploidy=2)
 - `-d, --dosage-matrix`: Output dosage matrix file (0,1 if ploidy=1; 0,1,2 if ploidy=2)
 - `-b, --dosage-bimbam`: Output dosage matrix file in BIMBAM format (feature,ref,alt,dosages...)

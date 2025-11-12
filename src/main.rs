@@ -109,10 +109,10 @@ fn parse_coverage_file(path: &str) -> std::io::Result<(String, Vec<f64>)> {
         } else if line_str.starts_with("#") {
             // Skip header lines
             continue;
-        } else if !line_str.is_empty()
-            && let Ok(value) = line_str.parse::<f64>()
-        {
-            coverage.push(value);
+        } else if !line_str.is_empty() {
+            if let Ok(value) = line_str.parse::<f64>() {
+                coverage.push(value);
+            }
         }
     }
 
@@ -134,7 +134,7 @@ fn parse_coverage_file(path: &str) -> std::io::Result<(String, Vec<f64>)> {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None, disable_help_flag = true, disable_version_flag = true)]
 struct Args {
-    /// Sample table file: sample_name<tab>input_file (supports PACK and GAF formats)
+    /// Sample table file: sample_name<tab>input_file (PACK and GAF formats)
     #[arg(help_heading = "Input", short, long)]
     sample_table: String,
 
