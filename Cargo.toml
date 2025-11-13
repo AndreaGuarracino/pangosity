@@ -5,12 +5,12 @@ authors = ["Andrea Guarracino <aguarra1@uthsc.edu>"]
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.5.51", features = ["derive"] }
-flate2 = "1.1.5"
-niffler = "3.0.0"
-log = "0.4.28"
-env_logger = "0.11.8"
-rayon = "1.11.0"
+clap = { version = "4.5", features = ["derive"] }
+flate2 = "1.1"
+niffler = "3.0"
+log = "0.4"
+env_logger = "0.11"
+rayon = "1.11"
 
 #gafpack = { path = "/home/guarracino/git/gafpack" }
 gafpack = { git = "https://github.com/pangenome/gafpack", rev = "b539b0f507698779c89827c82d5979c1b3146333" }
