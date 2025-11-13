@@ -204,6 +204,16 @@ cov_stats <- coverage %>%
 x_min <- 0
 x_max <- max(node_lens$cum_end, na.rm = TRUE)
 
+# Determine if we should use linear or log scale for coverage plots
+max_coverage_global <- max(coverage$coverage, na.rm = TRUE)
+use_linear_scale <- max_coverage_global <= 200
+
+if (use_linear_scale) {
+  cat("Maximum coverage is", max_coverage_global, "(<= 200), using linear scale for coverage plots\n")
+} else {
+  cat("Maximum coverage is", max_coverage_global, "(> 200), using log10 scale for coverage plots\n")
+}
+
 cat("Creating plots\n")
 
 # Plot 1: Genotype Distribution by Sample (stacked bar chart)
@@ -251,13 +261,6 @@ p1b <- ggplot(zyg_stats_len_pct, aes(x = sample, y = total_length, fill = genoty
 p2 <- ggplot(coverage %>% filter(coverage > 0), aes(x = sample, y = coverage, fill = sample)) +
   geom_violin(alpha = 0.7, draw_quantiles = c(0.25, 0.5, 0.75)) +
   geom_boxplot(width = 0.1, alpha = 0.5, outlier.shape = NA) +
-  scale_y_continuous(trans = "log10") +
-  labs(
-    title = "Coverage distribution by sample", 
-    subtitle = "Violin plots with quartiles (log10 scale, zero coverage excluded)",
-    x = NULL, 
-    y = "Coverage (log10)"
-  ) +
   theme_minimal(base_size = 12) +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
@@ -265,6 +268,27 @@ p2 <- ggplot(coverage %>% filter(coverage > 0), aes(x = sample, y = coverage, fi
     plot.title = element_text(hjust = 0.5),
     plot.subtitle = element_text(hjust = 0.5)
   )
+
+# Conditionally apply scale and labels for Plot 2
+if (use_linear_scale) {
+  p2 <- p2 +
+    scale_y_continuous() +
+    labs(
+      title = "Coverage distribution by sample", 
+      subtitle = "Violin plots with quartiles (linear scale, zero coverage excluded)",
+      x = NULL, 
+      y = "Coverage"
+    )
+} else {
+  p2 <- p2 +
+    scale_y_continuous(trans = "log10") +
+    labs(
+      title = "Coverage distribution by sample", 
+      subtitle = "Violin plots with quartiles (log10 scale, zero coverage excluded)",
+      x = NULL, 
+      y = "Coverage (log10)"
+    )
+}
 
 # Plot 3: Genotypes across nodes (heatmap with rectangles scaled by node length)
 p3 <- ggplot(zyg_long %>% filter(!is.na(genotype))) +
@@ -459,17 +483,6 @@ median_cov_display <- coverage %>%
     .groups = "drop"
   )
 
-# Determine if we should use linear or log scale for coverage plots
-max_coverage_global <- max(median_cov_display$max_coverage, na.rm = TRUE)
-use_linear_scale <- max_coverage_global <= 500
-
-if (use_linear_scale) {
-  cat("Maximum coverage is", max_coverage_global, "(<= 500), using linear scale for coverage plots\n")
-} else {
-  cat("Maximum coverage is", max_coverage_global, "(> 500), using log10 scale for coverage plots\n")
-}
-
-
 # Calculate median coverage per sample for capping
 median_cov_per_sample <- coverage %>%
   filter(!is.na(coverage), coverage > 0) %>%
@@ -516,16 +529,16 @@ if (!is.null(thresholds)) {
     
     # Add text annotation for this threshold
     # Stagger the vjust to avoid overlapping labels
-    vjust_offset <- -0.5 - (i - 1) * 1.2
-    p4 <- p4 + annotate("text", 
-                        x = Inf, 
-                        y = threshold_val, 
-                        label = sprintf("Threshold %d: %.1f", i, threshold_val),
-                        hjust = 1.2, 
-                        vjust = vjust_offset, 
-                        size = 3.5, 
-                        color = "black", 
-                        fontface = "bold")
+    #vjust_offset <- -0.5 - (i - 1) * 1.2
+    #p4 <- p4 + annotate("text", 
+    #                    x = Inf, 
+    #                    y = threshold_val, 
+    #                    label = sprintf("Threshold %d: %.1f", i, threshold_val),
+    #                    hjust = 1.2, 
+    #                    vjust = vjust_offset, 
+    #                    size = 3.5, 
+    #                    color = "black", 
+    #                    fontface = "bold")
   }
 }
 
@@ -593,7 +606,6 @@ p6 <- ggplot(
 ) +
   geom_violin(aes(x = factor(gt_num), y = coverage, fill = factor(gt_num)), alpha = 0.7) +
   geom_boxplot(aes(x = factor(gt_num), y = coverage), width = 0.1, outlier.shape = NA) +
-  scale_y_continuous(trans = "log10") +
   scale_x_discrete(labels = c("0" = "0/0", "1" = "0/1", "2" = "1/1")) +
   scale_fill_manual(
     values = c("0" = "#2166ac", "1" = "#fddbc7", "2" = "#b2182b"),
@@ -601,18 +613,33 @@ p6 <- ggplot(
     name = "Genotype"
   ) +
   facet_wrap(~sample, scales = "free_y") +
-  labs(
-    title = "Coverage distribution by genotype call",
-    subtitle = "Violin plots showing coverage for each genotype (log10 scale)",
-    x = "Genotype", 
-    y = "Coverage (log10)"
-  ) +
   theme_minimal(base_size = 12) +
   theme(
     legend.position = "none",
     plot.title = element_text(hjust = 0.5),
     plot.subtitle = element_text(hjust = 0.5)
   )
+
+# Conditionally apply scale and labels for Plot 6
+if (use_linear_scale) {
+  p6 <- p6 +
+    scale_y_continuous() +
+    labs(
+      title = "Coverage distribution by genotype call",
+      subtitle = "Violin plots showing coverage for each genotype (linear scale)",
+      x = "Genotype", 
+      y = "Coverage"
+    )
+} else {
+  p6 <- p6 +
+    scale_y_continuous(trans = "log10") +
+    labs(
+      title = "Coverage distribution by genotype call",
+      subtitle = "Violin plots showing coverage for each genotype (log10 scale)",
+      x = "Genotype", 
+      y = "Coverage (log10)"
+    )
+}
 
 # Save plots
 cat("Saving plots to:", output_pdf, "\n")
