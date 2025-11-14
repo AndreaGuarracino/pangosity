@@ -6,6 +6,10 @@ Pangenome-based zygosity matrices.
   <img src="pangosity-logo.png" alt="Pangosity logo" width="300"/>
 </p>
 
+## Why pangosity?
+
+Structural variants (SVs) are major drivers of phenotypic diversity, disease susceptibility, and evolutionary adaptation. Unlike single nucleotide polymorphisms, SVs can alter gene dosage, disrupt regulatory regions, and create entirely novel genomic contexts. Traditional linear reference genomes systematically miss this variation, obscuring biologically important loci. Pangenome graphs solve this by representing multiple haplotypes simultaneously, capturing the full spectrum of structural variation. However, translating graph alignments into genotypes remains challenging. Pangosity bridges this gap by computing copy-number-based genotypes from graph alignments. By normalizing node coverage to estimated haploid coverage, it calls diploid or haploid genotypes with configurable confidence thresholds. Pangosity produces genotype and dosage matrices suitable for genome-wide association studies (GWAS), quantitative trait locus (QTL) mapping, and population genetic analyses.
+
 ## Installation
 
 ```bash
