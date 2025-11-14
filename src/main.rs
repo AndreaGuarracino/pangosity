@@ -4,7 +4,7 @@ use flate2::write::GzEncoder;
 use log::{debug, error, info, warn};
 use rayon::prelude::*;
 use std::fs::File;
-use std::io::{BufReader, prelude::*};
+use std::io::{BufReader, BufWriter, prelude::*};
 use std::sync::Arc;
 
 /// Input file format
@@ -155,7 +155,7 @@ struct Args {
     #[arg(help_heading = "Calling parameters", short, long, default_value = "2")]
     ploidy: u8,
 
-    /// Genotype calling thresholds [default: 0.4 if ploidy=1; 0.6,1.4 if ploidy=2]
+    /// Genotype calling thresholds [default: 0.5 if ploidy=1; 0.5,1.5 if ploidy=2]
     #[arg(short, help_heading = "Calling parameters", long)]
     calling_thresholds: Option<String>,
 
@@ -352,9 +352,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         // Default thresholds (copy-number model)
         if args.ploidy == 1 {
-            vec![0.4]
+            vec![0.5]
         } else {
-            vec![0.6, 1.4]
+            vec![0.5, 1.5]
         }
     };
 
@@ -766,10 +766,11 @@ fn call_zygosity(
 
 /// Write feature filter mask to output file
 fn write_feature_filter_mask(mask: &[u8], output_path: &str) -> std::io::Result<()> {
-    let mut file = File::create(output_path)?;
+    let mut writer = create_writer(output_path)?;
     for &m in mask {
-        writeln!(file, "{}", m)?;
+        writeln!(writer, "{}", m)?;
     }
+    writer.flush()?;
     Ok(())
 }
 
@@ -804,18 +805,18 @@ fn write_zygosity_matrix(
         }
     }
 
-    let mut file = File::create(output_path)?;
+    let mut writer = create_writer(output_path)?;
 
     // Write header
-    write!(file, "#feature")?;
+    write!(writer, "#feature")?;
     for sample in samples {
-        write!(file, "\t{}", sample.name)?;
+        write!(writer, "\t{}", sample.name)?;
     }
-    writeln!(file)?;
+    writeln!(writer)?;
 
     // Write zygosity for each feature (1-based indexing)
     for feature_idx in 0..num_features {
-        write!(file, "{}", feature_idx + 1)?;
+        write!(writer, "{}", feature_idx + 1)?;
 
         for sample in samples {
             let coverage = sample.coverage[feature_idx];
@@ -832,11 +833,12 @@ fn write_zygosity_matrix(
                 zygosity.to_string()
             };
 
-            write!(file, "\t{}", genotype)?;
+            write!(writer, "\t{}", genotype)?;
         }
-        writeln!(file)?;
+        writeln!(writer)?;
     }
 
+    writer.flush()?;
     Ok(())
 }
 
@@ -855,18 +857,18 @@ fn write_dosage_matrix(
     }
 
     let num_features = samples[0].coverage.len();
-    let mut file = File::create(output_path)?;
+    let mut writer = create_writer(output_path)?;
 
     // Write header
-    write!(file, "#feature")?;
+    write!(writer, "#feature")?;
     for sample in samples {
-        write!(file, "\t{}", sample.name)?;
+        write!(writer, "\t{}", sample.name)?;
     }
-    writeln!(file)?;
+    writeln!(writer)?;
 
     // Write dosage for each feature
     for feature_idx in 0..num_features {
-        write!(file, "{}", feature_idx + 1)?;
+        write!(writer, "{}", feature_idx + 1)?;
 
         for sample in samples {
             let coverage = sample.coverage[feature_idx];
@@ -877,11 +879,12 @@ fn write_dosage_matrix(
                 thresholds,
             );
 
-            write!(file, "\t{}", zygosity.to_dosage(ploidy))?;
+            write!(writer, "\t{}", zygosity.to_dosage(ploidy))?;
         }
-        writeln!(file)?;
+        writeln!(writer)?;
     }
 
+    writer.flush()?;
     Ok(())
 }
 
@@ -902,12 +905,12 @@ fn write_dosage_bimbam(
     }
 
     let num_features = samples[0].coverage.len();
-    let mut file = File::create(output_path)?;
+    let mut writer = create_writer(output_path)?;
 
     // Write BIMBAM format (no header)
     // Each line: feature_id, ref_allele, alt_allele, dosage1, dosage2, ...
     for feature_idx in 0..num_features {
-        write!(file, "N{},A,T", feature_idx + 1)?;
+        write!(writer, "N{},A,T", feature_idx + 1)?;
 
         for sample in samples {
             let coverage = sample.coverage[feature_idx];
@@ -918,11 +921,12 @@ fn write_dosage_bimbam(
                 thresholds,
             );
 
-            write!(file, ",{}", zygosity.to_dosage(ploidy))?;
+            write!(writer, ",{}", zygosity.to_dosage(ploidy))?;
         }
-        writeln!(file)?;
+        writeln!(writer)?;
     }
 
+    writer.flush()?;
     Ok(())
 }
 
@@ -939,27 +943,28 @@ fn write_copynumber_matrix(
     }
 
     let num_features = samples[0].coverage.len();
-    let mut file = File::create(output_path)?;
+    let mut writer = create_writer(output_path)?;
 
     // Write header
-    write!(file, "#feature")?;
+    write!(writer, "#feature")?;
     for sample in samples {
-        write!(file, "\t{}", sample.name)?;
+        write!(writer, "\t{}", sample.name)?;
     }
-    writeln!(file)?;
+    writeln!(writer)?;
 
     // Write relative coverage for each feature
     for feature_idx in 0..num_features {
-        write!(file, "{}", feature_idx + 1)?;
+        write!(writer, "{}", feature_idx + 1)?;
 
         for sample in samples {
             let coverage = sample.coverage[feature_idx];
             let rel_cov = coverage / sample.haploid_coverage;
-            write!(file, "\t{:.3}", rel_cov)?;
+            write!(writer, "\t{:.3}", rel_cov)?;
         }
-        writeln!(file)?;
+        writeln!(writer)?;
     }
 
+    writer.flush()?;
     Ok(())
 }
 
@@ -978,31 +983,31 @@ fn write_debug_matrix(
     }
 
     let num_features = samples[0].coverage.len();
-    let mut file = File::create(output_path)?;
+    let mut writer = create_writer(output_path)?;
 
     // Write sample haploid coverage and thresholds in header
     for sample in samples {
-        write!(file, "##{}:haploid_coverage={:.3}", sample.name, sample.haploid_coverage)?;
+        write!(writer, "##{}:haploid_coverage={:.3}", sample.name, sample.haploid_coverage)?;
 
         // Convert thresholds from copy-number to absolute coverage
         match (ploidy, thresholds.len()) {
             // Ploidy 1, simple mode: single threshold
             (1, 1) => {
                 let t = thresholds[0] * sample.haploid_coverage;
-                write!(file, ";thresholds=[cov<{:.3}→0, cov≥{:.3}→1]", t, t)?;
+                write!(writer, ";thresholds=[cov<{:.3}→0, cov≥{:.3}→1]", t, t)?;
             }
             // Ploidy 1, no-call mode: lower and upper thresholds
             (1, 2) => {
                 let t0 = thresholds[0] * sample.haploid_coverage;
                 let t1 = thresholds[1] * sample.haploid_coverage;
-                write!(file, ";thresholds=[cov<{:.3}→0, cov∈[{:.3},{:.3})→., cov≥{:.3}→1]",
+                write!(writer, ";thresholds=[cov<{:.3}→0, cov∈[{:.3},{:.3})→., cov≥{:.3}→1]",
                        t0, t0, t1, t1)?;
             }
             // Ploidy 2, simple mode: het_lower and het_upper
             (2, 2) => {
                 let t0 = thresholds[0] * sample.haploid_coverage;
                 let t1 = thresholds[1] * sample.haploid_coverage;
-                write!(file, ";thresholds=[cov<{:.3}→0/0, cov∈[{:.3},{:.3})→0/1, cov≥{:.3}→1/1]",
+                write!(writer, ";thresholds=[cov<{:.3}→0/0, cov∈[{:.3},{:.3})→0/1, cov≥{:.3}→1/1]",
                        t0, t0, t1, t1)?;
             }
             // Ploidy 2, no-call mode: 4 boundaries
@@ -1011,25 +1016,25 @@ fn write_debug_matrix(
                 let t1 = thresholds[1] * sample.haploid_coverage;
                 let t2 = thresholds[2] * sample.haploid_coverage;
                 let t3 = thresholds[3] * sample.haploid_coverage;
-                write!(file, ";thresholds=[cov<{:.3}→0/0, cov∈[{:.3},{:.3})→./., cov∈[{:.3},{:.3})→0/1, cov∈[{:.3},{:.3})→./., cov≥{:.3}→1/1]",
+                write!(writer, ";thresholds=[cov<{:.3}→0/0, cov∈[{:.3},{:.3})→./., cov∈[{:.3},{:.3})→0/1, cov∈[{:.3},{:.3})→./., cov≥{:.3}→1/1]",
                        t0, t0, t1, t1, t2, t2, t3, t3)?;
             }
             _ => {}
         }
-        writeln!(file)?;
+        writeln!(writer)?;
     }
 
     // Write column headers
-    write!(file, "#feature")?;
+    write!(writer, "#feature")?;
     for sample in samples {
-        write!(file, "\t{}_cov\t{}_cn\t{}_gt\t{}_dosage",
+        write!(writer, "\t{}_cov\t{}_cn\t{}_gt\t{}_dosage",
                sample.name, sample.name, sample.name, sample.name)?;
     }
-    writeln!(file)?;
+    writeln!(writer)?;
 
     // Write data for each feature
     for feature_idx in 0..num_features {
-        write!(file, "{}", feature_idx + 1)?;
+        write!(writer, "{}", feature_idx + 1)?;
 
         for sample in samples {
             let coverage = sample.coverage[feature_idx];
@@ -1048,11 +1053,12 @@ fn write_debug_matrix(
             };
             let dosage = zygosity.to_dosage(ploidy);
 
-            write!(file, "\t{:.3}\t{:.3}\t{}\t{}", coverage, copy_number, genotype, dosage)?;
+            write!(writer, "\t{:.3}\t{:.3}\t{}\t{}", coverage, copy_number, genotype, dosage)?;
         }
-        writeln!(file)?;
+        writeln!(writer)?;
     }
 
+    writer.flush()?;
     Ok(())
 }
 
@@ -1078,4 +1084,17 @@ fn compute_median(values: &[f64], threshold: f64) -> f64 {
     } else {
         filtered[mid]
     }
+}
+
+/// Create a buffered writer with optional gzip compression based on file extension
+fn create_writer(output_path: &str) -> std::io::Result<BufWriter<Box<dyn Write>>> {
+    let file = File::create(output_path)?;
+
+    let writer: Box<dyn Write> = if output_path.ends_with(".gz") {
+        Box::new(GzEncoder::new(file, Compression::fast()))
+    } else {
+        Box::new(file)
+    };
+
+    Ok(BufWriter::new(writer))
 }

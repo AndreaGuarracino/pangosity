@@ -30,8 +30,8 @@ pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv
 # Save coverage (for GAF inputs)
 pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv --save-coverage coverage_dir/
 
-# Multiple output formats
-pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv -d dosages.tsv -b dosages.bimbam
+# Multiple output formats (compressed output auto-detected from .gz extension)
+pangosity -s samples.txt --gfa graph.gfa -g genotypes.tsv -d dosages.tsv.gz -b dosages.bimbam.gz
 
 # With copy-number matrix (continuous values for QC)
 pangosity -s samples.txt -g genotypes.tsv -n copynumbers.tsv
@@ -40,22 +40,19 @@ pangosity -s samples.txt -g genotypes.tsv -n copynumbers.tsv
 pangosity -s mixed_samples.txt --gfa graph.gfa -d dosages.tsv
 ```
 
-### Input
+## Input
 
-Pangosity supports multiple input formats (uncompressed or gzipped) with automatic detection:
-
-- **PACK** (coverage files) - Direct input, no conversion needed
-- **GAF** (Graph Alignment Format) - Converted to coverage via `gafpack`; it requires the GFA graph file
-
-Sample table file (tab-separated):
+### Sample table (tab-separated)
 ```
 sample1	sample1.pack.gz
 sample2	sample2.gaf.gz
 ```
 
-#### PACK format
+### Supported formats
+- **PACK**: Coverage files (direct input, `.gz` supported)
+- **GAF**: Graph alignments (requires `--gfa` graph file, `.gz` supported)
 
-Coverage files in tall format:
+PACK format:
 ```
 ##sample: sample_name
 #coverage
@@ -160,40 +157,40 @@ For **Ploidy 2**:
 
 ### Simple mode (default)
 
-**Ploidy 1**: specify a `threshold` (default `threshold=0.4`):
-- `coverage < threshold×haploid_cov → 0` (absent)
-- `coverage ≥ threshold×haploid_coverage → 1` (present)
+**Ploidy 1** (threshold = 0.5):
+- `coverage < 0.5×haploid → 0` (absent)
+- `coverage ≥ 0.5×haploid → 1` (present)
 
-**Ploidy 2**: specify `low` and `high` thresholds (default `low=0.6, high=1.4`):
-- `coverage < low×haploid_coverage → 0/0` (0 copies, ~0×haploid)
-- `low×haploid_coverage ≤ coverage < high×haploid_coverage → 0/1` (1 copy, ~1×haploid)
-- `coverage ≥ high×haploid_coverage → 1/1` (2 copies, ~2×haploid)
+**Ploidy 2** (thresholds = 0.5, 1.5):
+- `coverage < 0.5×haploid → 0/0` (0 copies)
+- `0.5×haploid ≤ coverage < 1.5×haploid → 0/1` (1 copy)
+- `coverage ≥ 1.5×haploid → 1/1` (2 copies)
 
 ### No-call mode
 
-To mark uncertain genotypes as missing:
+Add uncertainty zones for ambiguous calls:
 
-**Ploidy 1**: specify 2 values to create a no-call zone:
+**Ploidy 1** (2 thresholds):
 ```bash
 pangosity -s samples.txt -g genotypes.tsv -p 1 -c 0.3,0.7
 ```
-- `coverage < 0.3×haploid_coverage → 0`
-- `0.3×haploid_coverage ≤ coverage < 0.7×haploid_coverage → .` (no-call)
-- `coverage ≥ 0.7×haploid_coverage → 1`
+- `< 0.3×haploid → 0`
+- `[0.3, 0.7)×haploid → .` (no-call)
+- `≥ 0.7×haploid → 1`
 
-**Ploidy 2**: specify 4 values to create no-call zones:
+**Ploidy 2** (4 thresholds):
 ```bash
 pangosity -s samples.txt -g genotypes.tsv -p 2 -c 0.3,0.7,1.3,1.7
 ```
-- `coverage < 0.3×haploid_coverage → 0/0` (confident absent)
-- `0.3×haploid_coverage ≤ coverage < 0.7×haploid_coverage → ./.` (no-call, uncertain 0/0 vs 0/1)
-- `0.7×haploid_coverage ≤ coverage < 1.3×haploid_coverage → 0/1` (confident heterozygous, ~1 copy)
-- `1.3×haploid_coverage ≤ coverage < 1.7×haploid_coverage → ./.` (no-call, uncertain 0/1 vs 1/1)
-- `coverage ≥ 1.7×haploid_coverage → 1/1` (confident homozygous, ~2 copies)
+- `< 0.3×haploid → 0/0`
+- `[0.3, 0.7)×haploid → ./.` (uncertain 0/0 vs 0/1)
+- `[0.7, 1.3)×haploid → 0/1`
+- `[1.3, 1.7)×haploid → ./.` (uncertain 0/1 vs 1/1)
+- `≥ 1.7×haploid → 1/1`
 
 ## Feature coverage filtering
 
-Outlier detection using IQR method:
+Detect and mask outlier features using IQR method:
 
 ```bash
 pangosity -s samples.txt -g genotypes.tsv --feature-cov-mask coverage_mask.txt
@@ -225,7 +222,7 @@ pangosity -s samples.txt -g genotypes.tsv
 For genome-wide association studies, pangosity can output dosage matrices in BIMBAM format:
 
 ```bash
-# Generate BIMBAM dosage matrix for GEMMA
+# Generate BIMBAM dosage matrix
 pangosity -s samples.txt -b dosages.bimbam
 
 # Create phenotype file (one value per line, matching sample order in samples.txt)
